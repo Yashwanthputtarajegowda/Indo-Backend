@@ -52,6 +52,16 @@ app.post('/api/media/signature', async (req, res) => {
   catch (error) { return res.status(503).json({ ok: false, error: error.message || 'Cloudinary is not configured.' }); }
 });
 
+app.get('/api/account/me', async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
+  try {
+    const snapshot = await db.ref(`users/${user.uid}`).get();
+    if (!snapshot.exists()) return res.status(404).json({ ok: false, error: 'Profile not found.' });
+    return res.json({ ok: true, profile: snapshot.val() });
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not load profile.' }); }
+});
+
 app.post('/api/account/check-user-id', async (req, res) => {
   if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
   const userId = normalizeUserId(req.body?.userId);
@@ -86,7 +96,6 @@ app.post('/api/account/claim-user-id', async (req, res) => {
     if (existingProfile.exists() && existingProfile.val()?.usernameKey) {
       return res.status(409).json({ ok: false, error: 'This account already has a User ID. One user can have only one User ID.' });
     }
-
     const usernameRef = db.ref(`usernames/${userIdKey(userId)}`);
     const claim = await usernameRef.transaction((current) => {
       if (current === null) return { uid: user.uid, username: `@${userId}` };
@@ -94,11 +103,9 @@ app.post('/api/account/claim-user-id', async (req, res) => {
       return undefined;
     });
     if (!claim.committed) return res.status(409).json({ ok: false, error: `@${userId} is already taken. Choose another User ID.` });
-
     const counterRef = db.ref('system/indoCounter');
     const counter = await counterRef.transaction((current) => (Number(current) || 1165) + 1);
     if (!counter.committed) { await usernameRef.remove(); return res.status(500).json({ ok: false, error: 'Could not generate Indo ID.' }); }
-
     const indoId = `INDO-${String(counter.snapshot.val()).padStart(6, '0')}`;
     await userRef.set({
       uid: user.uid, indoId, name, username: `@${userId}`, usernameKey: userId, email: user.email || '', accountType,
