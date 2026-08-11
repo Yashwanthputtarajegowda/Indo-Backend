@@ -65,6 +65,7 @@ app.post('/api/media/signature', async (req, res) => {
 app.post('/api/media/videos', async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
   if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
+  const mediaType = req.body?.mediaType === 'reel' ? 'reel' : 'video';
   const publicId = String(req.body?.publicId || '').trim();
   const secureUrl = String(req.body?.secureUrl || '').trim();
   const title = String(req.body?.title || '').trim().slice(0, 120);
@@ -76,10 +77,11 @@ app.post('/api/media/videos', async (req, res) => {
     const videoRef = db.ref('videos').push();
     const video = {
       id: videoRef.key,
+      mediaType,
       ownerUid: user.uid,
       creator: profile.username || `@${user.uid.slice(0, 8)}`,
       creatorName: profile.name || 'Indo User',
-      title: title || 'Untitled video',
+      title: title || (mediaType === 'reel' ? 'Untitled reel' : 'Untitled video'),
       caption,
       publicId,
       secureUrl,
@@ -99,10 +101,12 @@ app.post('/api/media/videos', async (req, res) => {
 app.get('/api/media/videos', async (req, res) => {
   if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+  const type = String(req.query.type || '').trim().toLowerCase();
   try {
-    const snapshot = await db.ref('videos').orderByChild('createdAt').limitToLast(limit).get();
-    const videos = Object.values(snapshot.val() || {}).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
-    return res.json({ ok: true, videos });
+    const snapshot = await db.ref('videos').orderByChild('createdAt').limitToLast(100).get();
+    let videos = Object.values(snapshot.val() || {}).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    if (type === 'video' || type === 'reel') videos = videos.filter((item) => (item.mediaType || 'video') === type);
+    return res.json({ ok: true, videos: videos.slice(0, limit) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Could not load videos.' });
   }
