@@ -28,12 +28,12 @@ export async function cleanupInactiveAccounts({ db, auth, now = Date.now() }) {
 
     if (usernameKey) {
       const usernameSnapshot = await db.ref(`usernames/${usernameKey}`).get();
-
       if (usernameSnapshot.exists() && usernameSnapshot.val()?.uid === uid) {
         await db.ref(`usernames/${usernameKey}`).remove();
       }
     }
 
+    // Remove account-owned data before deleting the Firebase Auth user.
     await db.ref(`users/${uid}`).remove();
 
     try {
