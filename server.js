@@ -6,6 +6,7 @@ import { getDatabaseWithUrl } from 'firebase-admin/database';
 import { createCloudinarySignature, getCloudinaryConfig } from './services/cloudinary-signature.js';
 import { cleanupInactiveAccounts } from './services/account-cleanup.js';
 import { deleteAccountData } from './services/account-delete.js';
+import { toggleFollow, getFollowStatus } from './services/social-follow.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -145,6 +146,28 @@ app.post('/api/account/delete', async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
   try { const result = await deleteAccountData({ db, auth, uid: user.uid }); return res.json({ ok: true, ...result }); }
   catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not delete account.' }); }
+});
+
+app.post('/api/social/follow', async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  const targetUid = String(req.body?.targetUid || '').trim();
+  const follow = req.body?.follow === true;
+  if (!targetUid) return res.status(400).json({ ok: false, error: 'Target user is required.' });
+  try {
+    const targetSnapshot = await db.ref(`users/${targetUid}`).get();
+    if (!targetSnapshot.exists()) return res.status(404).json({ ok: false, error: 'Target profile not found.' });
+    const result = await toggleFollow({ db, followerUid: user.uid, targetUid, follow });
+    return res.json({ ok: true, ...result });
+  } catch (error) { return res.status(400).json({ ok: false, error: error.message || 'Could not update follow status.' }); }
+});
+
+app.get('/api/social/follow-status/:targetUid', async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  const targetUid = String(req.params.targetUid || '').trim();
+  try {
+    const result = await getFollowStatus({ db, followerUid: user.uid, targetUid });
+    return res.json({ ok: true, ...result });
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not load follow status.' }); }
 });
 
 app.post('/api/account/activity', async (req, res) => {
