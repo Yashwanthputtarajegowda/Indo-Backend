@@ -30,6 +30,18 @@ function normalizeUserId(value) {
   return String(value || '').trim().toLowerCase().replace(/^@/, '');
 }
 
+// Firebase Realtime Database keys cannot contain . # $ / [ ]. Encode those
+// characters so User IDs such as yashwanth#07 remain valid and unique.
+function userIdKey(userId) {
+  return userId
+    .replace(/\./g, '%2E')
+    .replace(/#/g, '%23')
+    .replace(/\$/g, '%24')
+    .replace(/\//g, '%2F')
+    .replace(/\[/g, '%5B')
+    .replace(/\]/g, '%5D');
+}
+
 function validUserId(userId) {
   return userId.length >= 1 && userId.length <= 50;
 }
@@ -57,7 +69,7 @@ app.post('/api/account/check-user-id', async (req, res) => {
   const userId = normalizeUserId(req.body?.userId);
   if (!validUserId(userId)) return res.status(400).json({ ok: false, error: 'User ID must be 1–50 characters.' });
   try {
-    const snapshot = await db.ref(`usernames/${userId}`).get();
+    const snapshot = await db.ref(`usernames/${userIdKey(userId)}`).get();
     return res.json({ ok: true, userId, available: !snapshot.exists() });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Could not check User ID.' });
@@ -75,7 +87,7 @@ app.post('/api/account/claim-user-id', async (req, res) => {
   if (!name) return res.status(400).json({ ok: false, error: 'User name is required.' });
 
   try {
-    const usernameRef = db.ref(`usernames/${userId}`);
+    const usernameRef = db.ref(`usernames/${userIdKey(userId)}`);
     const claim = await usernameRef.transaction(current => current === null ? { uid: user.uid, username: `@${userId}` } : undefined);
     if (!claim.committed) return res.status(409).json({ ok: false, error: `@${userId} is already taken. Choose another User ID.` });
 
