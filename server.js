@@ -2,9 +2,11 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import admin from 'firebase-admin';
+import { getDatabaseWithUrl } from 'firebase-admin/database';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || 'https://indo-174f0-default-rtdb.firebaseio.com';
 
 function initFirebaseAdmin() {
   if (admin.apps.length) return admin.app();
@@ -14,19 +16,19 @@ function initFirebaseAdmin() {
   if (!clientEmail || !privateKey) return null;
   return admin.initializeApp({
     credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
-    databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://indo-174f0-default-rtdb.firebaseio.com'
+    databaseURL: DATABASE_URL
   });
 }
 
 const firebaseAdmin = initFirebaseAdmin();
-const db = firebaseAdmin ? admin.database() : null;
-const auth = firebaseAdmin ? admin.auth() : null;
+const db = firebaseAdmin ? getDatabaseWithUrl(DATABASE_URL, firebaseAdmin) : null;
+const auth = firebaseAdmin ? admin.auth(firebaseAdmin) : null;
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, app: 'Indo-Backend', firebaseAdmin: Boolean(firebaseAdmin) });
+  res.json({ ok: true, app: 'Indo-Backend', firebaseAdmin: Boolean(firebaseAdmin), databaseConfigured: Boolean(db) });
 });
 
 function normalizeUserId(value) {
