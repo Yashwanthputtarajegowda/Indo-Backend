@@ -49,7 +49,7 @@ function userIdKey(userId) {
 }
 
 function validUserId(userId) {
-  return userId.length >= 1 && userId.length <= 50;
+  return /^[a-z0-9._-]{1,50}$/.test(userId);
 }
 
 async function requireUser(req, res) {
@@ -97,10 +97,35 @@ app.post('/api/media/signature', async (req, res) => {
 app.post('/api/account/check-user-id', async (req, res) => {
   if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
   const userId = normalizeUserId(req.body?.userId);
-  if (!validUserId(userId)) return res.status(400).json({ ok: false, error: 'User ID must be 1–50 characters.' });
+  if (!validUserId(userId)) return res.status(400).json({ ok: false, error: 'User ID can contain only letters, numbers, dots, underscores, and hyphens.' });
   try {
     const snapshot = await db.ref(`usernames/${userIdKey(userId)}`).get();
-    return res.json({ ok: true, userId, available: !snapshot.exists() });
+
+    if (!snapshot.exists()) {
+      return res.json({ ok: true, userId, available: true, exists: false });
+    }
+
+    const claim = snapshot.val() || {};
+    let user = null;
+
+    if (claim.uid) {
+      const userSnapshot = await db.ref(`users/${claim.uid}`).get();
+      if (userSnapshot.exists()) {
+        const profile = userSnapshot.val() || {};
+        user = {
+          userId: profile.username || `@${userId}`,
+          name: profile.name || 'Indo User'
+        };
+      }
+    }
+
+    return res.json({
+      ok: true,
+      userId,
+      available: false,
+      exists: Boolean(user),
+      user
+    });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Could not check User ID.' });
   }
@@ -113,7 +138,7 @@ app.post('/api/account/claim-user-id', async (req, res) => {
   const userId = normalizeUserId(req.body?.userId);
   const name = String(req.body?.name || '').trim();
   const accountType = req.body?.accountType === 'private' ? 'private' : 'public';
-  if (!validUserId(userId)) return res.status(400).json({ ok: false, error: 'User ID must be 1–50 characters.' });
+  if (!validUserId(userId)) return res.status(400).json({ ok: false, error: 'Invalid User ID.' });
   if (!name) return res.status(400).json({ ok: false, error: 'User name is required.' });
 
   try {
