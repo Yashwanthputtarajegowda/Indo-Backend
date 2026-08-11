@@ -4,10 +4,12 @@ import cors from 'cors';
 import admin from 'firebase-admin';
 import { getDatabaseWithUrl } from 'firebase-admin/database';
 import { createCloudinarySignature, getCloudinaryConfig } from './services/cloudinary-signature.js';
+import { cleanupInactiveAccounts } from './services/account-cleanup.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || 'https://indo-174f0-default-rtdb.firebaseio.com';
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function initFirebaseAdmin() {
   if (admin.apps.length) return admin.app();
@@ -135,7 +137,8 @@ app.post('/api/account/claim-user-id', async (req, res) => {
       usernameKey: userId,
       email: user.email || '',
       accountType,
-      createdAt: admin.database.ServerValue.TIMESTAMP
+      createdAt: admin.database.ServerValue.TIMESTAMP,
+      lastActiveAt: admin.database.ServerValue.TIMESTAMP
     });
 
     return res.json({ ok: true, indoId, username: `@${userId}` });
@@ -143,6 +146,33 @@ app.post('/api/account/claim-user-id', async (req, res) => {
     return res.status(500).json({ ok: false, error: error.message || 'Could not create account profile.' });
   }
 });
+
+app.post('/api/account/activity', async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
+
+  try {
+    await db.ref(`users/${user.uid}/lastActiveAt`).set(admin.database.ServerValue.TIMESTAMP);
+    return res.json({ ok: true, lastActiveAt: Date.now() });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Could not update activity.' });
+  }
+});
+
+async function runInactiveAccountCleanup() {
+  try {
+    const result = await cleanupInactiveAccounts({ db, auth });
+    console.log('[account-cleanup]', result);
+  } catch (error) {
+    console.error('[account-cleanup] failed:', error);
+  }
+}
+
+if (db && auth) {
+  runInactiveAccountCleanup();
+  setInterval(runInactiveAccountCleanup, CLEANUP_INTERVAL_MS);
+}
 
 app.get('/', (_req, res) => {
   res.json({ app: 'Indo-Backend', status: 'running' });
