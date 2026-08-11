@@ -44,9 +44,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 function normalizeUserId(value) { return String(value || '').trim().toLowerCase().replace(/^@/, ''); }
-function userIdKey(userId) {
-  return userId.replace(/\./g, '%2E').replace(/#/g, '%23').replace(/\$/g, '%24').replace(/\//g, '%2F').replace(/\[/g, '%5B').replace(/\]/g, '%5D');
-}
+function userIdKey(userId) { return userId.replace(/\./g, '%2E').replace(/#/g, '%23').replace(/\$/g, '%24').replace(/\//g, '%2F').replace(/\[/g, '%5B').replace(/\]/g, '%5D'); }
 function validUserId(userId) { return /^[a-z0-9._-]{1,50}$/.test(userId); }
 
 async function requireUser(req, res) {
@@ -62,6 +60,52 @@ app.post('/api/media/signature', async (req, res) => {
   const timestamp = Math.floor(Date.now() / 1000);
   try { return res.json({ ok: true, ...getCloudinaryConfig(), timestamp, signature: createCloudinarySignature(timestamp) }); }
   catch (error) { return res.status(503).json({ ok: false, error: error.message || 'Cloudinary is not configured.' }); }
+});
+
+app.post('/api/media/videos', async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
+  const publicId = String(req.body?.publicId || '').trim();
+  const secureUrl = String(req.body?.secureUrl || '').trim();
+  const title = String(req.body?.title || '').trim().slice(0, 120);
+  const caption = String(req.body?.caption || '').trim().slice(0, 500);
+  if (!publicId || !secureUrl) return res.status(400).json({ ok: false, error: 'Uploaded video data is required.' });
+  try {
+    const profileSnapshot = await db.ref(`users/${user.uid}`).get();
+    const profile = profileSnapshot.val() || {};
+    const videoRef = db.ref('videos').push();
+    const video = {
+      id: videoRef.key,
+      ownerUid: user.uid,
+      creator: profile.username || `@${user.uid.slice(0, 8)}`,
+      creatorName: profile.name || 'Indo User',
+      title: title || 'Untitled video',
+      caption,
+      publicId,
+      secureUrl,
+      duration: Number(req.body?.duration || 0),
+      width: Number(req.body?.width || 0),
+      height: Number(req.body?.height || 0),
+      views: 0,
+      createdAt: admin.database.ServerValue.TIMESTAMP
+    };
+    await videoRef.set(video);
+    return res.status(201).json({ ok: true, video });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Could not save video.' });
+  }
+});
+
+app.get('/api/media/videos', async (req, res) => {
+  if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+  try {
+    const snapshot = await db.ref('videos').orderByChild('createdAt').limitToLast(limit).get();
+    const videos = Object.values(snapshot.val() || {}).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    return res.json({ ok: true, videos });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Could not load videos.' });
+  }
 });
 
 app.get('/api/account/me', async (req, res) => {
