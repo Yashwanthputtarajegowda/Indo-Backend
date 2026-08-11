@@ -112,6 +112,21 @@ app.get('/api/media/videos', async (req, res) => {
   }
 });
 
+app.post('/api/media/videos/:videoId/view', async (req, res) => {
+  if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
+  const videoId = String(req.params.videoId || '').trim();
+  if (!videoId) return res.status(400).json({ ok: false, error: 'Video ID is required.' });
+  try {
+    const videoRef = db.ref(`videos/${videoId}`);
+    const snapshot = await videoRef.get();
+    if (!snapshot.exists()) return res.status(404).json({ ok: false, error: 'Video not found.' });
+    const result = await videoRef.child('views').transaction((current) => (Number(current) || 0) + 1);
+    return res.json({ ok: true, videoId, views: Number(result.snapshot.val()) || 0 });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Could not record video view.' });
+  }
+});
+
 app.get('/api/account/me', async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
   if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
