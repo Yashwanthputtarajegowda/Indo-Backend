@@ -38,37 +38,14 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '2mb' }));
 
-function getConfigStatus() {
-  const cloudinary = (() => {
-    try { return getCloudinaryConfig(); } catch { return null; }
-  })();
-  return {
-    firebaseAdmin: Boolean(firebaseAdmin),
-    databaseConfigured: Boolean(db),
-    authConfigured: Boolean(auth),
-    cloudinaryConfigured: Boolean(cloudinary),
-    corsOriginsConfigured: CORS_ORIGINS.length > 0,
-    port: Number(PORT)
-  };
-}
-
 app.get('/api/health', (_req, res) => {
-  const config = getConfigStatus();
-  const ready = config.firebaseAdmin && config.databaseConfigured && config.authConfigured;
-  res.status(ready ? 200 : 503).json({ ok: ready, app: 'Indo-Backend', config });
-});
-
-app.get('/api/health/config', (_req, res) => {
-  const config = getConfigStatus();
-  const missing = [];
-  if (!config.firebaseAdmin) missing.push('FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY');
-  if (!config.databaseConfigured) missing.push('FIREBASE_DATABASE_URL');
-  if (!config.cloudinaryConfigured) missing.push('CLOUDINARY_CLOUD_NAME / API credentials');
-  res.json({ ok: missing.length === 0, config, missing });
+  res.json({ ok: true, app: 'Indo-Backend', firebaseAdmin: Boolean(firebaseAdmin), databaseConfigured: Boolean(db) });
 });
 
 function normalizeUserId(value) { return String(value || '').trim().toLowerCase().replace(/^@/, ''); }
-function userIdKey(userId) { return userId.replace(/\\./g, '%2E').replace(/#/g, '%23').replace(/\\$/g, '%24').replace(/\\//g, '%2F').replace(/\\[/g, '%5B').replace(/\\]/g, '%5D'); }
+function userIdKey(userId) {
+  return userId.replace(/\./g, '%2E').replace(/#/g, '%23').replace(/\$/g, '%24').replace(/\//g, '%2F').replace(/\[/g, '%5B').replace(/\]/g, '%5D');
+}
 function validUserId(userId) { return /^[a-z0-9._-]{1,50}$/.test(userId); }
 
 async function requireUser(req, res) {
@@ -125,7 +102,7 @@ app.post('/api/account/check-user-id', async (req, res) => {
       const userSnapshot = await db.ref(`users/${claim.uid}`).get();
       if (userSnapshot.exists()) {
         const value = userSnapshot.val() || {};
-        profile = { userId: value.username || `@${userId}`, name: value.name || 'Indo User' };
+        profile = { uid: claim.uid, userId: value.username || `@${userId}`, name: value.name || 'Indo User' };
       }
     }
     return res.json({ ok: true, userId, available: false, exists: Boolean(profile), user: profile });
@@ -157,7 +134,9 @@ app.post('/api/account/claim-user-id', async (req, res) => {
     const counter = await counterRef.transaction((current) => (Number(current) || 1165) + 1);
     if (!counter.committed) { await usernameRef.remove(); return res.status(500).json({ ok: false, error: 'Could not generate Indo ID.' }); }
     const indoId = `INDO-${String(counter.snapshot.val()).padStart(6, '0')}`;
-    await userRef.set({ uid: user.uid, indoId, name, username: `@${userId}`, usernameKey: userId, email: user.email || '', accountType, createdAt: existingProfile.exists() ? (existingProfile.val()?.createdAt || admin.database.ServerValue.TIMESTAMP) : admin.database.ServerValue.TIMESTAMP, lastActiveAt: admin.database.ServerValue.TIMESTAMP });
+    await userRef.set({ uid: user.uid, indoId, name, username: `@${userId}`, usernameKey: userId, email: user.email || '', accountType,
+      createdAt: existingProfile.exists() ? (existingProfile.val()?.createdAt || admin.database.ServerValue.TIMESTAMP) : admin.database.ServerValue.TIMESTAMP,
+      lastActiveAt: admin.database.ServerValue.TIMESTAMP });
     return res.json({ ok: true, indoId, username: `@${userId}` });
   } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not create account profile.' }); }
 });
