@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import admin from 'firebase-admin';
 import { getDatabaseWithUrl } from 'firebase-admin/database';
+import { createCloudinarySignature, getCloudinaryConfig } from './services/cloudinary-signature.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -35,8 +36,6 @@ function normalizeUserId(value) {
   return String(value || '').trim().toLowerCase().replace(/^@/, '');
 }
 
-// Firebase Realtime Database keys cannot contain . # $ / [ ]. Encode those
-// characters so User IDs such as yashwanth#07 remain valid and unique.
 function userIdKey(userId) {
   return userId
     .replace(/\./g, '%2E')
@@ -68,6 +67,30 @@ async function requireUser(req, res) {
     return null;
   }
 }
+
+app.post('/api/media/signature', async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+
+  const timestamp = Math.floor(Date.now() / 1000);
+
+  try {
+    const signature = createCloudinarySignature(timestamp);
+    const config = getCloudinaryConfig();
+
+    return res.json({
+      ok: true,
+      ...config,
+      timestamp,
+      signature
+    });
+  } catch (error) {
+    return res.status(503).json({
+      ok: false,
+      error: error.message || 'Cloudinary is not configured.'
+    });
+  }
+});
 
 app.post('/api/account/check-user-id', async (req, res) => {
   if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
