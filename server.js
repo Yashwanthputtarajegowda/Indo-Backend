@@ -5,6 +5,7 @@ import admin from 'firebase-admin';
 import { getDatabaseWithUrl } from 'firebase-admin/database';
 import { createCloudinarySignature, getCloudinaryConfig } from './services/cloudinary-signature.js';
 import { cleanupInactiveAccounts } from './services/account-cleanup.js';
+import { deleteAccountData } from './services/account-delete.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -65,28 +66,17 @@ app.get('/api/account/me', async (req, res) => {
 app.patch('/api/account/profile', async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
   if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
-
   const name = String(req.body?.name || '').trim();
   const bio = String(req.body?.bio || '').trim().slice(0, 160);
-
   if (!name) return res.status(400).json({ ok: false, error: 'User Name is required.' });
-
   try {
     const userRef = db.ref(`users/${user.uid}`);
     const snapshot = await userRef.get();
     if (!snapshot.exists()) return res.status(404).json({ ok: false, error: 'Profile not found.' });
-
-    await userRef.update({
-      name,
-      bio,
-      lastActiveAt: admin.database.ServerValue.TIMESTAMP
-    });
-
+    await userRef.update({ name, bio, lastActiveAt: admin.database.ServerValue.TIMESTAMP });
     const updated = await userRef.get();
     return res.json({ ok: true, profile: updated.val() });
-  } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message || 'Could not update profile.' });
-  }
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not update profile.' }); }
 });
 
 app.post('/api/account/check-user-id', async (req, res) => {
@@ -141,6 +131,16 @@ app.post('/api/account/claim-user-id', async (req, res) => {
     });
     return res.json({ ok: true, indoId, username: `@${userId}` });
   } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not create account profile.' }); }
+});
+
+app.post('/api/account/delete', async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  try {
+    const result = await deleteAccountData({ db, auth, uid: user.uid });
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Could not delete account.' });
+  }
 });
 
 app.post('/api/account/activity', async (req, res) => {
