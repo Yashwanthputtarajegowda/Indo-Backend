@@ -7,6 +7,8 @@ import { createCloudinarySignature, getCloudinaryConfig } from './services/cloud
 import { cleanupInactiveAccounts } from './services/account-cleanup.js';
 import { deleteAccountData } from './services/account-delete.js';
 import { toggleFollow, getFollowStatus } from './services/social-follow.js';
+import { createAccountContactRouter } from './routes/account-contact.js';
+import { createAccountVisibilityRouter } from './routes/account-visibility.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -54,6 +56,9 @@ async function requireUser(req, res) {
   try { return await auth.verifyIdToken(header.slice(7)); }
   catch { res.status(401).json({ ok: false, error: 'Invalid authentication token.' }); return null; }
 }
+
+app.use('/api', createAccountContactRouter({ db, auth, requireUser }));
+app.use('/api', createAccountVisibilityRouter({ db, requireUser }));
 
 app.post('/api/media/signature', async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
@@ -201,7 +206,7 @@ app.post('/api/account/claim-user-id', async (req, res) => {
     await userRef.set({ uid: user.uid, indoId, name, username: `@${userId}`, usernameKey: userId, email: user.email || '', accountType,
       createdAt: existingProfile.exists() ? (existingProfile.val()?.createdAt || admin.database.ServerValue.TIMESTAMP) : admin.database.ServerValue.TIMESTAMP,
       lastActiveAt: admin.database.ServerValue.TIMESTAMP });
-    return res.json({ ok: true, indoId, username: `@${userId}` });
+    return res.json({ ok: true, indoId, username: `@${userId}`, accountType });
   } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not create account profile.' }); }
 });
 
