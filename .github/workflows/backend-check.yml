@@ -6,12 +6,16 @@ on:
     paths:
       - "server.js"
       - "services/**"
+      - "routes/**"
+      - "scripts/**"
       - "package.json"
       - ".github/workflows/backend-check.yml"
   pull_request:
     paths:
       - "server.js"
       - "services/**"
+      - "routes/**"
+      - "scripts/**"
       - "package.json"
       - ".github/workflows/backend-check.yml"
 
@@ -29,13 +33,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Install dependencies
         run: npm install
 
       - name: Syntax check
-        run: node --check server.js
+        run: |
+          node --check server.js
+          node --check scripts/production-preflight.mjs
 
       - name: Health-start smoke check
         run: |
