@@ -62,9 +62,11 @@ async function requireUser(req, res) {
 
 app.use('/api', createAccountContactRouter({ db, auth, requireUser }));
 app.use('/api', createAccountVisibilityRouter({ db, requireUser }));
+// Earnings must be mounted before media-engagement because media-engagement also contains legacy /earnings routes.
+// This makes routes/earnings.js the single source of truth for earning state and watch-time storage.
+app.use('/api', createEarningsRouter({ db, requireUser }));
 app.use('/api', createMediaEngagementRouter({ db, requireUser }));
 app.use('/api', createSocialBlockRouter({ db, requireUser }));
-app.use('/api', createEarningsRouter({ db, requireUser }));
 
 app.post('/api/media/signature', async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
