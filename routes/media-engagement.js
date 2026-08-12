@@ -1,13 +1,8 @@
 import express from 'express';
+import { createNotification, listNotifications, markNotificationRead } from '../services/notifications.js';
 
 function safeText(value, max = 500) {
   return String(value || '').trim().slice(0, max);
-}
-
-async function createNotification(db, targetUid, notification) {
-  if (!targetUid || !db) return;
-  const ref = db.ref(`users/${targetUid}/notifications`).push();
-  await ref.set({ id: ref.key, read: false, createdAt: Date.now(), ...notification });
 }
 
 export function createMediaEngagementRouter({ db, requireUser }) {
@@ -36,9 +31,15 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       });
       if (like && !wasLiked && media.ownerUid && media.ownerUid !== user.uid) {
         const actor = (await db.ref(`users/${user.uid}`).get()).val() || {};
-        await createNotification(db, media.ownerUid, {
-          type: 'like', actorUid: user.uid, actorUsername: actor.username || '@user', mediaId,
-          message: 'liked your video.'
+        await createNotification({
+          db,
+          recipientUid: media.ownerUid,
+          type: 'like',
+          actorUid: user.uid,
+          actorName: actor.name || 'Indo User',
+          actorUserId: actor.username || '',
+          text: 'liked your video',
+          targetId: mediaId
         });
       }
       return res.json({ ok: true, liked: like, likes: Number(result.snapshot.val()) || 0 });
@@ -93,15 +94,20 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
       if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: 'Media not found.' });
       const media = mediaSnapshot.val() || {};
-      const profileSnapshot = await db.ref(`users/${user.uid}`).get();
-      const profile = profileSnapshot.val() || {};
+      const profile = (await db.ref(`users/${user.uid}`).get()).val() || {};
       const ref = db.ref(`videoComments/${mediaId}`).push();
       const comment = { id: ref.key, mediaId, uid: user.uid, username: profile.username || `@${user.uid.slice(0, 8)}`, text, createdAt: Date.now() };
       await ref.set(comment);
       if (media.ownerUid && media.ownerUid !== user.uid) {
-        await createNotification(db, media.ownerUid, {
-          type: 'comment', actorUid: user.uid, actorUsername: comment.username, mediaId,
-          message: 'commented on your video.'
+        await createNotification({
+          db,
+          recipientUid: media.ownerUid,
+          type: 'comment',
+          actorUid: user.uid,
+          actorName: profile.name || 'Indo User',
+          actorUserId: comment.username,
+          text: 'commented on your video',
+          targetId: mediaId
         });
       }
       return res.status(201).json({ ok: true, comment });
@@ -127,8 +133,7 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     if (!user) return;
     if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
     try {
-      const snapshot = await db.ref(`users/${user.uid}/notifications`).limitToLast(100).get();
-      const notifications = Object.values(snapshot.val() || {}).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+      const notifications = await listNotifications({ db, uid: user.uid, limit: 100 });
       return res.json({ ok: true, notifications });
     } catch (error) {
       return res.status(500).json({ ok: false, error: error.message || 'Could not load notifications.' });
@@ -141,10 +146,7 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
     const notificationId = safeText(req.params.notificationId, 120);
     try {
-      const ref = db.ref(`users/${user.uid}/notifications/${notificationId}`);
-      const snapshot = await ref.get();
-      if (!snapshot.exists()) return res.status(404).json({ ok: false, error: 'Notification not found.' });
-      await ref.update({ read: true });
+      await markNotificationRead({ db, uid: user.uid, notificationId });
       return res.json({ ok: true });
     } catch (error) {
       return res.status(500).json({ ok: false, error: error.message || 'Could not mark notification as read.' });
