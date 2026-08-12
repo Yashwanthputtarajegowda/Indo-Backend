@@ -16,6 +16,7 @@ import { createMediaEngagementRouter } from "./routes/media-engagement.js";
 import { createSocialBlockRouter } from "./routes/social-block.js";
 import { createEarningsRouter } from "./routes/earnings.js";
 import { createMessagesRouter } from "./routes/messages.js";
+import { createFollowRequestsRouter } from "./routes/follow-requests.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -58,21 +59,22 @@ const db = firebaseAdmin
   : null;
 const auth = firebaseAdmin ? admin.auth(firebaseAdmin) : null;
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      const normalizedOrigin = String(origin).replace(/\/$/, "");
-      if (CORS_ORIGINS.includes(normalizedOrigin)) {
-        return callback(null, true);
-      }
-      return callback(new Error("Origin is not allowed by CORS."));
-    },
-    methods: ["GET", "POST", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    maxAge: 86400,
-  }),
-);
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    const normalizedOrigin = String(origin).replace(/\/$/, "");
+    if (CORS_ORIGINS.includes(normalizedOrigin)) {
+      return callback(null, true);
+    }
+    return callback(new Error("Origin is not allowed by CORS."));
+  },
+  methods: ["GET", "POST", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  maxAge: 86400,
+};
+
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/api/health", (_req, res) => {
@@ -132,6 +134,7 @@ app.use("/api", createEarningsRouter({ db, requireUser }));
 app.use("/api", createMediaEngagementRouter({ db, requireUser }));
 app.use("/api", createSocialBlockRouter({ db, requireUser }));
 app.use("/api", createMessagesRouter({ db, requireUser }));
+app.use("/api", createFollowRequestsRouter({ db, requireUser }));
 
 app.post("/api/media/signature", async (req, res) => {
   const user = await requireUser(req, res);
