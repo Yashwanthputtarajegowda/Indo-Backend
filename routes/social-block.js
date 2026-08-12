@@ -119,6 +119,44 @@ export function createSocialBlockRouter({ db, requireUser }) {
     }
   });
 
+  router.get('/stories', async (req, res, next) => {
+    if (!db) return next();
+    const requester = await getOptionalRequester(req, requireUser);
+    if (!requester) return res.status(401).json({ ok: false, error: 'Authentication required.' });
+    try {
+      const now = Date.now();
+      const snapshot = await db.ref('stories').orderByChild('expiresAt').startAt(now).get();
+      const stories = Object.values(snapshot.val() || {});
+      const profileCache = new Map();
+      const followerCache = new Map();
+      const visible = [];
+
+      for (const story of stories) {
+        const ownerUid = String(story.ownerUid || '');
+        if (!ownerUid) continue;
+        if (await isBlockedEitherWay({ db, requesterUid: requester.uid, ownerUid })) continue;
+        if (ownerUid === requester.uid) {
+          visible.push(story);
+          continue;
+        }
+        if (!profileCache.has(ownerUid)) profileCache.set(ownerUid, db.ref(`users/${ownerUid}`).get());
+        const profile = (await profileCache.get(ownerUid)).val() || {};
+        if ((profile.accountType || 'public') !== 'private') {
+          visible.push(story);
+          continue;
+        }
+        const key = `${ownerUid}:${requester.uid}`;
+        if (!followerCache.has(key)) followerCache.set(key, db.ref(`users/${ownerUid}/followers/${requester.uid}`).get());
+        if ((await followerCache.get(key)).exists()) visible.push(story);
+      }
+
+      visible.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+      return res.json({ ok: true, stories: visible });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || 'Could not load stories.' });
+    }
+  });
+
   router.get('/media/videos', async (req, res, next) => {
     if (!db) return next();
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
