@@ -1,0 +1,29 @@
+name: Production Smoke Check
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  production-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check backend health
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 \
+            -H 'Accept: application/json' \
+            https://indo-backend-production-41b1.up.railway.app/api/health
+
+      - name: Check production CORS preflight
+        run: |
+          set -euo pipefail
+          response=$(curl --silent --show-error --max-time 20 -D - -o /dev/null \
+            -X OPTIONS \
+            -H 'Origin: https://yashwanthputtarajegowda.github.io' \
+            -H 'Access-Control-Request-Method: POST' \
+            -H 'Access-Control-Request-Headers: content-type' \
+            https://indo-backend-production-41b1.up.railway.app/api/account/check-user-id)
+          printf '%s\n' "$response"
+          printf '%s\n' "$response" | grep -iq '^access-control-allow-origin: https://yashwanthputtarajegowda.github.io$'
+          printf '%s\n' "$response" | grep -iq '^access-control-allow-methods:'
