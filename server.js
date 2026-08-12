@@ -151,6 +151,21 @@ app.get("/api/stories", async (req, res) => {
   } catch { return res.status(500).json({ ok: false, error: "Could not load stories." }); }
 });
 
+app.get("/api/account/profile/:username", async (req, res) => {
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const username = normalizeUserId(req.params.username);
+  if (!validUserId(username)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
+  try {
+    const claim = await db.ref(`usernames/${userIdKey(username)}`).get();
+    if (!claim.exists() || !claim.val()?.uid) return res.status(404).json({ ok: false, error: "Profile not found." });
+    const profileSnapshot = await db.ref(`users/${claim.val().uid}`).get();
+    if (!profileSnapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
+    return res.json({ ok: true, profile: profileSnapshot.val() });
+  } catch {
+    return res.status(500).json({ ok: false, error: "Could not load profile." });
+  }
+});
+
 app.get("/api/account/me", async (req, res) => {
   const user = await requireUser(req, res); if (!user) return; if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
   try { const snapshot = await db.ref(`users/${user.uid}`).get(); if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." }); return res.json({ ok: true, profile: snapshot.val() }); }
