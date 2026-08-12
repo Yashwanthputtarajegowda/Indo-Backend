@@ -1,4 +1,5 @@
 import express from 'express';
+import { respondToFollowRequest } from '../services/social-follow.js';
 
 function clean(value, max = 120) {
   return String(value || '').trim().slice(0, max);
@@ -44,15 +45,44 @@ export function createSocialBlockRouter({ db, requireUser }) {
         blockedAt: Date.now()
       } : null;
 
-      const updates = {
+      await db.ref().update({
         [blockPath]: payload,
         [followingPath]: null,
         [followerPath]: null
-      };
-      await db.ref().update(updates);
+      });
       return res.json({ ok: true, blocked, user: payload });
     } catch (error) {
       return res.status(500).json({ ok: false, error: error.message || 'Could not update blocked user.' });
+    }
+  });
+
+  router.get('/social/follow-requests', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
+    try {
+      const [incomingSnapshot, outgoingSnapshot] = await Promise.all([
+        db.ref(`users/${user.uid}/followRequests`).get(),
+        db.ref(`users/${user.uid}/sentFollowRequests`).get()
+      ]);
+      return res.json({ ok: true, incoming: Object.values(incomingSnapshot.val() || {}), outgoing: Object.values(outgoingSnapshot.val() || {}) });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || 'Could not load follow requests.' });
+    }
+  });
+
+  router.post('/social/follow-requests/:requesterUid', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
+    const requesterUid = clean(req.params.requesterUid);
+    const accept = req.body?.accept === true;
+    if (!requesterUid) return res.status(400).json({ ok: false, error: 'Requester is required.' });
+    try {
+      const result = await respondToFollowRequest({ db, ownerUid: user.uid, requesterUid, accept });
+      return res.json(result);
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error.message || 'Could not respond to follow request.' });
     }
   });
 
