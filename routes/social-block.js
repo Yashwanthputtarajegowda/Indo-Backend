@@ -5,6 +5,25 @@ function clean(value, max = 120) {
   return String(value || '').trim().slice(0, max);
 }
 
+async function getOptionalRequester(req, requireUser) {
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Bearer ')) return null;
+  try {
+    return await requireUser(req, { status() { return this; }, json() { return this; } });
+  } catch {
+    return null;
+  }
+}
+
+async function isBlockedEitherWay({ db, requesterUid, ownerUid }) {
+  if (!requesterUid || !ownerUid || requesterUid === ownerUid) return false;
+  const [requesterBlocked, ownerBlocked] = await Promise.all([
+    db.ref(`users/${requesterUid}/blocked/${ownerUid}`).get(),
+    db.ref(`users/${ownerUid}/blocked/${requesterUid}`).get()
+  ]);
+  return requesterBlocked.exists() || ownerBlocked.exists();
+}
+
 async function canViewPrivateMedia({ db, requireUser, req, res, ownerUid }) {
   const header = req.headers.authorization || '';
   if (!header.startsWith('Bearer ')) {
@@ -14,6 +33,7 @@ async function canViewPrivateMedia({ db, requireUser, req, res, ownerUid }) {
   const requester = await requireUser(req, res);
   if (!requester) return false;
   if (requester.uid === ownerUid) return true;
+  if (await isBlockedEitherWay({ db, requesterUid: requester.uid, ownerUid })) return false;
   const follower = await db.ref(`users/${ownerUid}/followers/${requester.uid}`).get();
   return follower.exists();
 }
@@ -99,13 +119,13 @@ export function createSocialBlockRouter({ db, requireUser }) {
     }
   });
 
-  // This runs before the legacy /api/media/videos route in server.js.
-  // Private-account media is visible only to the owner or approved followers.
   router.get('/media/videos', async (req, res, next) => {
     if (!db) return next();
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
     const type = String(req.query.type || '').trim().toLowerCase();
     try {
+      let requester = null;
+      if ((req.headers.authorization || '').startsWith('Bearer ')) requester = await getOptionalRequester(req, requireUser);
       const snapshot = await db.ref('videos').orderByChild('createdAt').limitToLast(100).get();
       const allVideos = Object.values(snapshot.val() || {}).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
       const candidates = (type === 'video' || type === 'reel')
@@ -119,6 +139,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
       for (const video of candidates) {
         const ownerUid = String(video.ownerUid || '');
         if (!ownerUid) continue;
+        if (await isBlockedEitherWay({ db, requesterUid: requester?.uid, ownerUid })) continue;
         if (!profileCache.has(ownerUid)) profileCache.set(ownerUid, db.ref(`users/${ownerUid}`).get());
         const profile = (await profileCache.get(ownerUid)).val() || {};
         if ((profile.accountType || 'public') !== 'private') {
@@ -126,10 +147,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
           continue;
         }
 
-        const header = req.headers.authorization || '';
-        if (!header.startsWith('Bearer ')) continue;
-        const requester = await requireUser(req, res);
-        if (!requester) return;
+        if (!requester) continue;
         if (requester.uid === ownerUid) {
           visible.push(video);
           continue;
@@ -154,6 +172,12 @@ export function createSocialBlockRouter({ db, requireUser }) {
       const snapshot = await videoRef.get();
       if (!snapshot.exists()) return res.status(404).json({ ok: false, error: 'Video not found.' });
       const video = snapshot.val() || {};
+      const requester = (req.headers.authorization || '').startsWith('Bearer ')
+        ? await getOptionalRequester(req, requireUser)
+        : null;
+      if (await isBlockedEitherWay({ db, requesterUid: requester?.uid, ownerUid: String(video.ownerUid || '') })) {
+        return res.status(403).json({ ok: false, error: 'This user is blocked.' });
+      }
       const ownerSnapshot = await db.ref(`users/${video.ownerUid}`).get();
       const owner = ownerSnapshot.val() || {};
       if ((owner.accountType || 'public') === 'private') {
