@@ -9,6 +9,7 @@ import { deleteAccountData } from './services/account-delete.js';
 import { toggleFollow, getFollowStatus } from './services/social-follow.js';
 import { createAccountContactRouter } from './routes/account-contact.js';
 import { createAccountVisibilityRouter } from './routes/account-visibility.js';
+import { createMediaEngagementRouter } from './routes/media-engagement.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -59,6 +60,7 @@ async function requireUser(req, res) {
 
 app.use('/api', createAccountContactRouter({ db, auth, requireUser }));
 app.use('/api', createAccountVisibilityRouter({ db, requireUser }));
+app.use('/api', createMediaEngagementRouter({ db, requireUser }));
 
 app.post('/api/media/signature', async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
@@ -94,6 +96,7 @@ app.post('/api/media/videos', async (req, res) => {
       width: Number(req.body?.width || 0),
       height: Number(req.body?.height || 0),
       views: 0,
+      likes: 0,
       createdAt: admin.database.ServerValue.TIMESTAMP
     };
     await videoRef.set(video);
