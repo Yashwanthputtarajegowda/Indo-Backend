@@ -15,6 +15,7 @@ import { createAccountVisibilityRouter } from "./routes/account-visibility.js";
 import { createMediaEngagementRouter } from "./routes/media-engagement.js";
 import { createSocialBlockRouter } from "./routes/social-block.js";
 import { createEarningsRouter } from "./routes/earnings.js";
+import { createMessagesRouter } from "./routes/messages.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -116,6 +117,7 @@ app.use("/api", createAccountVisibilityRouter({ db, requireUser }));
 app.use("/api", createEarningsRouter({ db, requireUser }));
 app.use("/api", createMediaEngagementRouter({ db, requireUser }));
 app.use("/api", createSocialBlockRouter({ db, requireUser }));
+app.use("/api", createMessagesRouter({ db, requireUser }));
 
 app.post("/api/media/signature", async (req, res) => {
   const user = await requireUser(req, res);
