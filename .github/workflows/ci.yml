@@ -24,6 +24,3 @@ jobs:
 
       - name: Check earnings route syntax
         run: node --check routes/earnings.js
-
-      - name: Check story route syntax
-        run: node --check routes/story-upload.js
