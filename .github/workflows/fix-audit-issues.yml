@@ -1,4 +1,4 @@
-name: One-time audit fixes
+name: One-time backend audit fixes
 
 on:
   push:
@@ -9,12 +9,12 @@ permissions:
 
 jobs:
   patch:
-    if: ${{ !contains(github.event.head_commit.message, 'chore: apply audit fixes') }}
+    if: ${{ !contains(github.event.head_commit.message, 'chore: apply backend audit fixes') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Apply backend and frontend audit fixes
+      - name: Apply backend fixes
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -26,7 +26,7 @@ jobs:
           new_cors = '''const CORS_ORIGINS = Array.from(\n  new Set(\n    [\n      "https://yashwanthputtarajegowda.github.io",\n      ...String(\n        process.env.CORS_ORIGINS ||\n          "http://localhost:5173,http://localhost:3000",\n      ).split(","),\n    ]\n      .map((origin) => origin.trim().replace(/\\/$/, ""))\n      .filter(Boolean),\n  ),\n);'''
           if old_cors in text:
               text = text.replace(old_cors, new_cors, 1)
-          elif 'PRODUCTION_FRONTEND_ORIGINS' not in text and '"https://yashwanthputtarajegowda.github.io"' not in text:
+          elif '"https://yashwanthputtarajegowda.github.io"' not in text:
               raise SystemExit('Expected server CORS block not found')
 
           if 'createFollowRequestsRouter' not in text:
@@ -46,23 +46,15 @@ jobs:
               )
 
           backend.write_text(text)
-
-          signup = Path('../Indo/src/features/auth/signup-form.js')
-          s = signup.read_text()
-          old_catch = '''  } catch (error) {\n    await credential.user.delete().catch(() => {});\n    throw error;\n  }'''
-          new_catch = '''  } catch (error) {\n    try {\n      const cleanupToken = await credential.user.getIdToken();\n      await fetch(`${apiBase}/api/account/delete`, {\n        method: 'POST',\n        headers: { Authorization: `Bearer ${cleanupToken}` }\n      });\n    } catch {}\n    await credential.user.delete().catch(() => {});\n    throw error;\n  }'''
-          if old_catch in s:
-              s = s.replace(old_catch, new_catch, 1)
-          signup.write_text(s)
           PY
 
       - name: Remove one-time workflow
         run: rm -f .github/workflows/fix-audit-issues.yml
 
-      - name: Commit audit fixes
+      - name: Commit backend fixes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add server.js ../Indo/src/features/auth/signup-form.js .github/workflows/fix-audit-issues.yml
-          git commit -m "chore: apply audit fixes" || exit 0
+          git add server.js .github/workflows/fix-audit-issues.yml
+          git commit -m "chore: apply backend audit fixes" || exit 0
           git push
