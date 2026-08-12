@@ -1,5 +1,19 @@
 import { createNotification } from './notifications.js';
 
+async function syncFollowCounts({ db, followerUid, targetUid }) {
+  const [followingSnapshot, followersSnapshot] = await Promise.all([
+    db.ref(`users/${followerUid}/following`).get(),
+    db.ref(`users/${targetUid}/followers`).get()
+  ]);
+  const followingCount = followingSnapshot.exists() ? Object.keys(followingSnapshot.val() || {}).length : 0;
+  const followersCount = followersSnapshot.exists() ? Object.keys(followersSnapshot.val() || {}).length : 0;
+  await db.ref().update({
+    [`users/${followerUid}/followingCount`]: followingCount,
+    [`users/${targetUid}/followersCount`]: followersCount
+  });
+  return { followingCount, followersCount };
+}
+
 export async function toggleFollow({ db, followerUid, targetUid, follow }) {
   if (!db) throw new Error('Firebase Admin is not configured on the backend.');
   if (!followerUid || !targetUid) throw new Error('Both users are required.');
@@ -48,8 +62,8 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
       return {
         following: false,
         pending: true,
-        followingCount: Object.keys(follower.following || {}).length,
-        followersCount: Object.keys(target.followers || {}).length
+        followingCount: Number(follower.followingCount || 0),
+        followersCount: Number(target.followersCount || 0)
       };
     }
 
@@ -79,16 +93,11 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
     });
   }
 
-  const [followingSnapshot, followersSnapshot] = await Promise.all([
-    db.ref(`users/${followerUid}/following`).get(),
-    db.ref(`users/${targetUid}/followers`).get()
-  ]);
-
+  const counts = await syncFollowCounts({ db, followerUid, targetUid });
   return {
-    following: follow,
+    following: Boolean(follow),
     pending: false,
-    followingCount: followingSnapshot.exists() ? Object.keys(followingSnapshot.val() || {}).length : 0,
-    followersCount: followersSnapshot.exists() ? Object.keys(followersSnapshot.val() || {}).length : 0
+    ...counts
   };
 }
 
@@ -139,9 +148,19 @@ export async function respondToFollowRequest({ db, ownerUid, requesterUid, accep
       text: 'accepted your follow request',
       targetId: owner.username || ''
     });
-  } else {
-    await db.ref().update({ [requestPath]: null, [outgoingPath]: null });
+    const [followingSnapshot, followersSnapshot] = await Promise.all([
+      db.ref(`users/${requesterUid}/following`).get(),
+      db.ref(`users/${ownerUid}/followers`).get()
+    ]);
+    const followingCount = followingSnapshot.exists() ? Object.keys(followingSnapshot.val() || {}).length : 0;
+    const followersCount = followersSnapshot.exists() ? Object.keys(followersSnapshot.val() || {}).length : 0;
+    await db.ref().update({
+      [`users/${requesterUid}/followingCount`]: followingCount,
+      [`users/${ownerUid}/followersCount`]: followersCount
+    });
+    return { ok: true, accepted: true, followingCount, followersCount };
   }
 
-  return { ok: true, accepted: Boolean(accept) };
+  await db.ref().update({ [requestPath]: null, [outgoingPath]: null });
+  return { ok: true, accepted: false };
 }
