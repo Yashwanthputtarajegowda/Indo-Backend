@@ -1,3 +1,5 @@
+import { createNotification } from './notifications.js';
+
 export async function toggleFollow({ db, followerUid, targetUid, follow }) {
   if (!db) throw new Error('Firebase Admin is not configured on the backend.');
   if (!followerUid || !targetUid) throw new Error('Both users are required.');
@@ -10,6 +12,23 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
     await db.ref().update({
       [followerPath]: true,
       [targetPath]: true
+    });
+
+    const [followerSnapshot, targetSnapshot] = await Promise.all([
+      db.ref(`users/${followerUid}`).get(),
+      db.ref(`users/${targetUid}`).get()
+    ]);
+    const follower = followerSnapshot.val() || {};
+    const target = targetSnapshot.val() || {};
+    await createNotification({
+      db,
+      recipientUid: targetUid,
+      type: 'follow',
+      actorUid: followerUid,
+      actorName: follower.name || 'Indo User',
+      actorUserId: follower.username || '',
+      text: 'started following you',
+      targetId: target.username || ''
     });
   } else {
     await db.ref().update({
