@@ -108,8 +108,10 @@ app.get("/api/media/videos", async (req, res) => {
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
   const type = String(req.query.type || "").trim().toLowerCase();
   try {
-    const snapshot = await db.ref("videos").orderByChild("createdAt").limitToLast(100).get();
-    let videos = Object.values(snapshot.val() || {}).filter((item) => item && (item.secureUrl || item.videoUrl)).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    const snapshot = await db.ref("videos").get();
+    let videos = Object.values(snapshot.val() || {})
+      .filter((item) => item && (item.secureUrl || item.videoUrl || item.url))
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     if (type === "video" || type === "reel") videos = videos.filter((item) => (item.mediaType || "video") === type);
     return res.json({ ok: true, videos: videos.slice(0, limit) });
   } catch { return res.status(500).json({ ok: false, error: "Could not load videos." }); }
