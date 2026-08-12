@@ -10,6 +10,7 @@ import { toggleFollow, getFollowStatus } from './services/social-follow.js';
 import { createAccountContactRouter } from './routes/account-contact.js';
 import { createAccountVisibilityRouter } from './routes/account-visibility.js';
 import { createMediaEngagementRouter } from './routes/media-engagement.js';
+import { createSocialBlockRouter } from './routes/social-block.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -61,6 +62,7 @@ async function requireUser(req, res) {
 app.use('/api', createAccountContactRouter({ db, auth, requireUser }));
 app.use('/api', createAccountVisibilityRouter({ db, requireUser }));
 app.use('/api', createMediaEngagementRouter({ db, requireUser }));
+app.use('/api', createSocialBlockRouter({ db, requireUser }));
 
 app.post('/api/media/signature', async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
@@ -83,27 +85,15 @@ app.post('/api/media/videos', async (req, res) => {
     const profile = profileSnapshot.val() || {};
     const videoRef = db.ref('videos').push();
     const video = {
-      id: videoRef.key,
-      mediaType,
-      ownerUid: user.uid,
-      creator: profile.username || `@${user.uid.slice(0, 8)}`,
-      creatorName: profile.name || 'Indo User',
-      title: title || (mediaType === 'reel' ? 'Untitled reel' : 'Untitled video'),
-      caption,
-      publicId,
-      secureUrl,
-      duration: Number(req.body?.duration || 0),
-      width: Number(req.body?.width || 0),
-      height: Number(req.body?.height || 0),
-      views: 0,
-      likes: 0,
-      createdAt: admin.database.ServerValue.TIMESTAMP
+      id: videoRef.key, mediaType, ownerUid: user.uid,
+      creator: profile.username || `@${user.uid.slice(0, 8)}`, creatorName: profile.name || 'Indo User',
+      title: title || (mediaType === 'reel' ? 'Untitled reel' : 'Untitled video'), caption,
+      publicId, secureUrl, duration: Number(req.body?.duration || 0), width: Number(req.body?.width || 0), height: Number(req.body?.height || 0),
+      views: 0, likes: 0, createdAt: admin.database.ServerValue.TIMESTAMP
     };
     await videoRef.set(video);
     return res.status(201).json({ ok: true, video });
-  } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message || 'Could not save video.' });
-  }
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not save video.' }); }
 });
 
 app.get('/api/media/videos', async (req, res) => {
@@ -115,9 +105,7 @@ app.get('/api/media/videos', async (req, res) => {
     let videos = Object.values(snapshot.val() || {}).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     if (type === 'video' || type === 'reel') videos = videos.filter((item) => (item.mediaType || 'video') === type);
     return res.json({ ok: true, videos: videos.slice(0, limit) });
-  } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message || 'Could not load videos.' });
-  }
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not load videos.' }); }
 });
 
 app.post('/api/media/videos/:videoId/view', async (req, res) => {
@@ -130,9 +118,7 @@ app.post('/api/media/videos/:videoId/view', async (req, res) => {
     if (!snapshot.exists()) return res.status(404).json({ ok: false, error: 'Video not found.' });
     const result = await videoRef.child('views').transaction((current) => (Number(current) || 0) + 1);
     return res.json({ ok: true, videoId, views: Number(result.snapshot.val()) || 0 });
-  } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message || 'Could not record video view.' });
-  }
+  } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not record video view.' }); }
 });
 
 app.get('/api/account/me', async (req, res) => {
@@ -192,9 +178,7 @@ app.post('/api/account/claim-user-id', async (req, res) => {
   try {
     const userRef = db.ref(`users/${user.uid}`);
     const existingProfile = await userRef.get();
-    if (existingProfile.exists() && existingProfile.val()?.usernameKey) {
-      return res.status(409).json({ ok: false, error: 'This account already has a User ID. One user can have only one User ID.' });
-    }
+    if (existingProfile.exists() && existingProfile.val()?.usernameKey) return res.status(409).json({ ok: false, error: 'This account already has a User ID. One user can have only one User ID.' });
     const usernameRef = db.ref(`usernames/${userIdKey(userId)}`);
     const claim = await usernameRef.transaction((current) => {
       if (current === null) return { uid: user.uid, username: `@${userId}` };
