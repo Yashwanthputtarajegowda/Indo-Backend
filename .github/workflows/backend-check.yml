@@ -1,0 +1,46 @@
+name: Backend Check
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "server.js"
+      - "services/**"
+      - "package.json"
+      - ".github/workflows/backend-check.yml"
+  pull_request:
+    paths:
+      - "server.js"
+      - "services/**"
+      - "package.json"
+      - ".github/workflows/backend-check.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Syntax check
+        run: node --check server.js
+
+      - name: Health-start smoke check
+        run: |
+          PORT=3001 node server.js > /tmp/indo-backend.log 2>&1 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+          sleep 3
+          curl --fail --silent http://127.0.0.1:3001/api/health
