@@ -67,8 +67,10 @@ app.use('/api', createSocialBlockRouter({ db, requireUser }));
 app.post('/api/media/signature', async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
   const timestamp = Math.floor(Date.now() / 1000);
-  try { return res.json({ ok: true, ...getCloudinaryConfig(), timestamp, signature: createCloudinarySignature(timestamp) }); }
-  catch (error) { return res.status(503).json({ ok: false, error: error.message || 'Cloudinary is not configured.' }); }
+  const folder = 'indo/videos';
+  try {
+    return res.json({ ok: true, ...getCloudinaryConfig(), timestamp, folder, signature: createCloudinarySignature(timestamp, { folder }) });
+  } catch (error) { return res.status(503).json({ ok: false, error: error.message || 'Cloudinary is not configured.' }); }
 });
 
 app.post('/api/media/videos', async (req, res) => {
@@ -228,14 +230,13 @@ app.get('/api/social/follow-status/:targetUid', async (req, res) => {
 app.post('/api/account/activity', async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
   if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
-  try { await db.ref(`users/${user.uid}/lastActiveAt`).set(admin.database.ServerValue.TIMESTAMP); return res.json({ ok: true, lastActiveAt: Date.now() }); }
-  catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not update activity.' }); }
+  try { await db.ref(`users/${user.uid}/lastActiveAt`).set(admin.database.ServerValue.TIMESTAMP); return res.json({ ok: true, lastActiveAt: Date.now() }); } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not update activity.' }); }
 });
 
-async function runInactiveAccountCleanup() {
-  try { const result = await cleanupInactiveAccounts({ db, auth }); console.log('[account-cleanup]', result); }
-  catch (error) { console.error('[account-cleanup] failed:', error); }
-}
-if (db && auth) { runInactiveAccountCleanup(); setInterval(runInactiveAccountCleanup, CLEANUP_INTERVAL_MS); }
-app.get('/', (_req, res) => { res.json({ app: 'Indo-Backend', status: 'running' }); });
+app.use((error, _req, res, _next) => {
+  return res.status(500).json({ ok: false, error: error.message || 'Internal server error.' });
+});
+
 app.listen(PORT, () => { console.log(`Indo backend running on port ${PORT}`); });
+
+setInterval(() => { cleanupInactiveAccounts({ db, auth }).catch(() => {}); }, CLEANUP_INTERVAL_MS).unref();
