@@ -42,9 +42,24 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
   const targetPath = `users/${targetUid}/followers/${followerUid}`;
   const requestPath = `users/${targetUid}/followRequests/${followerUid}`;
   const outgoingPath = `users/${followerUid}/sentFollowRequests/${targetUid}`;
+  const alreadyFollowing = followerSnapshot.child(`following/${targetUid}`).exists();
+  const alreadyPending = targetSnapshot.child(`followRequests/${followerUid}`).exists();
 
   if (follow) {
     if (target.accountType === 'private') {
+      if (alreadyFollowing) {
+        const counts = await syncFollowCounts({ db, followerUid, targetUid });
+        return { following: true, pending: false, ...counts };
+      }
+      if (alreadyPending) {
+        return {
+          following: false,
+          pending: true,
+          followingCount: Number(follower.followingCount || 0),
+          followersCount: Number(target.followersCount || 0)
+        };
+      }
+
       await db.ref().update({
         [requestPath]: followerEntry,
         [outgoingPath]: targetEntry
@@ -65,6 +80,11 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
         followingCount: Number(follower.followingCount || 0),
         followersCount: Number(target.followersCount || 0)
       };
+    }
+
+    if (alreadyFollowing) {
+      const counts = await syncFollowCounts({ db, followerUid, targetUid });
+      return { following: true, pending: false, ...counts };
     }
 
     await db.ref().update({
@@ -130,6 +150,7 @@ export async function respondToFollowRequest({ db, ownerUid, requesterUid, accep
   const outgoingPath = `users/${requesterUid}/sentFollowRequests/${ownerUid}`;
   const followerPath = `users/${ownerUid}/followers/${requesterUid}`;
   const followingPath = `users/${requesterUid}/following/${ownerUid}`;
+  if (!ownerSnapshot.child(`followRequests/${requesterUid}`).exists()) throw new Error('Follow request no longer exists.');
 
   if (accept) {
     await db.ref().update({
