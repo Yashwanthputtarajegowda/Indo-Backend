@@ -21,3 +21,5 @@ jobs:
           for (const v of (d.videos || [])) console.log(JSON.stringify({id:v.id,mediaType:v.mediaType,secureUrl:v.secureUrl,videoUrl:v.videoUrl,url:v.url}));
           if (!d.ok || !Array.isArray(d.videos)) process.exit(1);
           NODE
+
+# redeploy-trigger: 2026-08-13T03:05
