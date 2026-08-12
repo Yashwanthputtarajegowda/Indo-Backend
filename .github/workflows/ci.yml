@@ -19,8 +19,5 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Check server syntax
-        run: node --check server.js
-
-      - name: Check earnings route syntax
-        run: node --check routes/earnings.js
+      - name: Check all backend JavaScript syntax
+        run: find . -name '*.js' -not -path './node_modules/*' -print0 | xargs -0 -n1 node --check
