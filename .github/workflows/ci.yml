@@ -17,10 +17,13 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Check server syntax
         run: node --check server.js
 
       - name: Check earnings route syntax
         run: node --check routes/earnings.js
+
+      - name: Check story route syntax
+        run: node --check routes/story-upload.js
