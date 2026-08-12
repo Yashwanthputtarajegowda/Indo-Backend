@@ -5,21 +5,32 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
   if (!followerUid || !targetUid) throw new Error('Both users are required.');
   if (followerUid === targetUid) throw new Error('You cannot follow your own account.');
 
+  const followerSnapshot = await db.ref(`users/${followerUid}`).get();
+  const targetSnapshot = await db.ref(`users/${targetUid}`).get();
+  if (!targetSnapshot.exists()) throw new Error('Target profile not found.');
+
+  const follower = followerSnapshot.val() || {};
+  const target = targetSnapshot.val() || {};
+  const followerEntry = {
+    uid: followerUid,
+    userId: follower.username || `@${followerUid.slice(0, 8)}`,
+    name: follower.name || 'Indo User'
+  };
+  const targetEntry = {
+    uid: targetUid,
+    userId: target.username || `@${targetUid.slice(0, 8)}`,
+    name: target.name || 'Indo User'
+  };
+
   const followerPath = `users/${followerUid}/following/${targetUid}`;
   const targetPath = `users/${targetUid}/followers/${followerUid}`;
 
   if (follow) {
     await db.ref().update({
-      [followerPath]: true,
-      [targetPath]: true
+      [followerPath]: targetEntry,
+      [targetPath]: followerEntry
     });
 
-    const [followerSnapshot, targetSnapshot] = await Promise.all([
-      db.ref(`users/${followerUid}`).get(),
-      db.ref(`users/${targetUid}`).get()
-    ]);
-    const follower = followerSnapshot.val() || {};
-    const target = targetSnapshot.val() || {};
     await createNotification({
       db,
       recipientUid: targetUid,
@@ -53,5 +64,5 @@ export async function getFollowStatus({ db, followerUid, targetUid }) {
   if (!db || !followerUid || !targetUid) return { following: false };
   if (followerUid === targetUid) return { following: false };
   const snapshot = await db.ref(`users/${followerUid}/following/${targetUid}`).get();
-  return { following: snapshot.exists() && snapshot.val() === true };
+  return { following: snapshot.exists() };
 }
