@@ -1,5 +1,6 @@
 import express from 'express';
 import { createNotification, listNotifications, markNotificationRead } from '../services/notifications.js';
+import { canAccessMedia } from './social-block.js';
 
 function safeText(value, max = 500) {
   return String(value || '').trim().slice(0, max);
@@ -25,6 +26,7 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       const snapshot = await mediaRef.get();
       if (!snapshot.exists()) return res.status(404).json({ ok: false, error: 'Media not found.' });
       const media = snapshot.val() || {};
+      if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
       const likeRef = db.ref(`videoLikes/${mediaId}/${user.uid}`);
       const wasLiked = Boolean((await likeRef.get()).val());
       await likeRef.set(like || null);
@@ -47,11 +49,13 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
     const mediaId = safeText(req.params.mediaId, 120);
     try {
-      const [mediaSnapshot, likeSnapshot, saveSnapshot] = await Promise.all([
-        db.ref(`videos/${mediaId}`).get(), db.ref(`videoLikes/${mediaId}/${user.uid}`).get(), db.ref(`videoSaves/${mediaId}/${user.uid}`).get()
-      ]);
+      const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
       if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: 'Media not found.' });
       const media = mediaSnapshot.val() || {};
+      if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
+      const [likeSnapshot, saveSnapshot] = await Promise.all([
+        db.ref(`videoLikes/${mediaId}/${user.uid}`).get(), db.ref(`videoSaves/${mediaId}/${user.uid}`).get()
+      ]);
       return res.json({ ok: true, likes: Number(media.likes || 0), liked: Boolean(likeSnapshot.val()), saved: Boolean(saveSnapshot.val()) });
     } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not load engagement.' }); }
   });
@@ -64,6 +68,8 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     try {
       const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
       if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: 'Media not found.' });
+      const media = mediaSnapshot.val() || {};
+      if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
       await db.ref(`videoSaves/${mediaId}/${user.uid}`).set(save || null);
       return res.json({ ok: true, saved: save });
     } catch (error) { return res.status(500).json({ ok: false, error: error.message || 'Could not update save.' }); }
@@ -79,6 +85,7 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
       if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: 'Media not found.' });
       const media = mediaSnapshot.val() || {};
+      if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
       const profile = (await db.ref(`users/${user.uid}`).get()).val() || {};
       const ref = db.ref(`videoComments/${mediaId}`).push();
       const comment = { id: ref.key, mediaId, uid: user.uid, username: profile.username || `@${user.uid.slice(0, 8)}`, text, createdAt: Date.now() };
@@ -89,9 +96,14 @@ export function createMediaEngagementRouter({ db, requireUser }) {
   });
 
   router.get('/media/:mediaId/comments', async (req, res) => {
+    const user = await requireUser(req, res); if (!user) return;
     if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
     const mediaId = safeText(req.params.mediaId, 120);
     try {
+      const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
+      if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: 'Media not found.' });
+      const media = mediaSnapshot.val() || {};
+      if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
       const snapshot = await db.ref(`videoComments/${mediaId}`).limitToLast(100).get();
       const comments = Object.values(snapshot.val() || {}).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
       return res.json({ ok: true, comments });
@@ -122,6 +134,7 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       const media = (await db.ref(`videos/${mediaId}`).get()).val() || {};
       const ownerUid = String(media.ownerUid || '');
       if (!ownerUid || ownerUid === viewer.uid) return res.json({ ok: true, counted: false });
+      if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
       const typeKey = media.mediaType === 'reel' ? 'reel' : 'video';
       const result = await db.ref(`users/${ownerUid}/earning/watchSeconds/${typeKey}`).transaction((current) => (Number(current) || 0) + seconds);
       return res.json({ ok: true, counted: true, type: typeKey, watchSeconds: Number(result.snapshot.val()) || 0 });
