@@ -5,7 +5,7 @@ export async function cleanupInactiveAccounts({ db, auth, now = Date.now() }) {
     return { checked: 0, deleted: 0, skipped: true };
   }
 
-  const snapshot = await db.ref('users').get();
+  const snapshot = await db.ref("users").get();
 
   if (!snapshot.exists()) {
     return { checked: 0, deleted: 0, skipped: false };
@@ -18,7 +18,9 @@ export async function cleanupInactiveAccounts({ db, auth, now = Date.now() }) {
   for (const [uid, profile] of Object.entries(users)) {
     checked += 1;
 
-    const lastActiveAt = Number(profile?.lastActiveAt || profile?.createdAt || 0);
+    const lastActiveAt = Number(
+      profile?.lastActiveAt || profile?.createdAt || 0,
+    );
 
     if (!lastActiveAt || now - lastActiveAt < SIX_MONTHS_MS) {
       continue;
@@ -39,7 +41,7 @@ export async function cleanupInactiveAccounts({ db, auth, now = Date.now() }) {
     try {
       await auth.deleteUser(uid);
     } catch (error) {
-      if (error?.code !== 'auth/user-not-found') {
+      if (error?.code !== "auth/user-not-found") {
         throw error;
       }
     }
