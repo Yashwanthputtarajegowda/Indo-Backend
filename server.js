@@ -208,3 +208,5 @@ app.post("/api/account/activity", async (req, res) => {
 app.use((error, _req, res, _next) => res.status(500).json({ ok: false, error: error.message || "Internal server error." }));
 app.listen(PORT, () => console.log(`Indo backend running on port ${PORT}`));
 setInterval(() => { cleanupInactiveAccounts({ db, auth }).catch(() => {}); }, CLEANUP_INTERVAL_MS).unref();
+
+// Railway deploy trigger: keep video-feed fix live.
