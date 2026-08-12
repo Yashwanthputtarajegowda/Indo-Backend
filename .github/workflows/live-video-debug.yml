@@ -1,0 +1,23 @@
+name: Live video debug
+on:
+  push:
+    branches: [main]
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check live video API
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/body -w '%{http_code}' 'https://indo-backend-production-41b1.up.railway.app/api/media/videos?limit=5')
+          echo "HTTP $code"
+          cat /tmp/body
+          node - <<'NODE'
+          const fs = require('fs');
+          const raw = fs.readFileSync('/tmp/body','utf8');
+          let d;
+          try { d = JSON.parse(raw); } catch { process.exit(2); }
+          console.log('ok=', d.ok, 'count=', Array.isArray(d.videos) ? d.videos.length : 'not-array');
+          for (const v of (d.videos || [])) console.log(JSON.stringify({id:v.id,mediaType:v.mediaType,secureUrl:v.secureUrl,videoUrl:v.videoUrl,url:v.url}));
+          if (!d.ok || !Array.isArray(d.videos)) process.exit(1);
+          NODE
