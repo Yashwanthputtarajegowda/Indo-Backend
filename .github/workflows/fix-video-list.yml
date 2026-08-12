@@ -1,0 +1,33 @@
+name: Repair video list query
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  repair:
+    if: "!contains(github.event.head_commit.message, '[video-query-fixed]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch video list endpoint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('server.js')
+          s = p.read_text()
+          old = '''    const snapshot = await db\n      .ref("videos")\n      .orderByChild("createdAt")\n      .limitToLast(100)\n      .get();\n    let videos = Object.values(snapshot.val() || {}).sort(\n      (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0),\n    );'''
+          new = '''    const snapshot = await db.ref("videos").get();\n    let videos = Object.values(snapshot.val() || {})\n      .filter((item) => item && (item.secureUrl || item.videoUrl || item.url))\n      .sort(\n        (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0),\n      );'''
+          if old not in s:
+              raise SystemExit('expected video query block not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          npm ci --omit=dev
+          node --check server.js
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.js .github/workflows/fix-video-list.yml
+          git commit -m 'fix: repair live video list query [video-query-fixed]'
+          git push
