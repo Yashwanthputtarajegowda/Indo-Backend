@@ -5,6 +5,11 @@ function safeText(value, max = 500) {
   return String(value || '').trim().slice(0, max);
 }
 
+const VIDEO_ELIGIBILITY_HOURS = 5000;
+const REEL_ELIGIBILITY_HOURS = 1000;
+const VIDEO_RATE_PER_1000_VIEWS = 0.5;
+const REEL_RATE_PER_1000_VIEWS = 0.1;
+
 export function createMediaEngagementRouter({ db, requireUser }) {
   const router = express.Router();
 
@@ -150,6 +155,67 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       return res.json({ ok: true });
     } catch (error) {
       return res.status(500).json({ ok: false, error: error.message || 'Could not mark notification as read.' });
+    }
+  });
+
+  router.post('/earnings/watch-progress', async (req, res) => {
+    const viewer = await requireUser(req, res);
+    if (!viewer) return;
+    if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
+    const mediaId = safeText(req.body?.mediaId, 120);
+    const seconds = Math.min(15, Math.max(0, Number(req.body?.seconds) || 0));
+    if (!mediaId || seconds <= 0) return res.status(400).json({ ok: false, error: 'Media ID and watch seconds are required.' });
+    try {
+      const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
+      if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: 'Media not found.' });
+      const media = mediaSnapshot.val() || {};
+      const ownerUid = String(media.ownerUid || '');
+      if (!ownerUid || ownerUid === viewer.uid) return res.json({ ok: true, counted: false });
+      const typeKey = media.mediaType === 'reel' ? 'reel' : 'video';
+      const watchRef = db.ref(`users/${ownerUid}/earning/watchSeconds/${typeKey}`);
+      const result = await watchRef.transaction((current) => (Number(current) || 0) + seconds);
+      return res.json({ ok: true, counted: true, type: typeKey, watchSeconds: Number(result.snapshot.val()) || 0 });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || 'Could not record watch progress.' });
+    }
+  });
+
+  router.get('/earnings/status', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
+    try {
+      const snapshot = await db.ref(`users/${user.uid}/earning`).get();
+      const earning = snapshot.val() || {};
+      const videoWatchSeconds = Number(earning.watchSeconds?.video || 0);
+      const reelWatchSeconds = Number(earning.watchSeconds?.reel || 0);
+      const videoWatchHours = videoWatchSeconds / 3600;
+      const reelWatchHours = reelWatchSeconds / 3600;
+      const eligible = videoWatchHours >= VIDEO_ELIGIBILITY_HOURS && reelWatchHours >= REEL_ELIGIBILITY_HOURS;
+      const earningEnabled = Boolean(earning.enabled);
+      return res.json({ ok: true, eligible, earningEnabled, videoWatchSeconds, reelWatchSeconds, videoWatchHours, reelWatchHours, requirements: { videoWatchHours: VIDEO_ELIGIBILITY_HOURS, reelWatchHours: REEL_ELIGIBILITY_HOURS }, rates: { videoPer1000Views: VIDEO_RATE_PER_1000_VIEWS, reelPer1000Views: REEL_RATE_PER_1000_VIEWS } });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || 'Could not load earning status.' });
+    }
+  });
+
+  router.post('/earnings/toggle', async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: 'Firebase Admin is not configured on the backend.' });
+    const enabled = req.body?.enabled === true;
+    try {
+      const earningRef = db.ref(`users/${user.uid}/earning`);
+      const snapshot = await earningRef.get();
+      const earning = snapshot.val() || {};
+      const videoWatchHours = Number(earning.watchSeconds?.video || 0) / 3600;
+      const reelWatchHours = Number(earning.watchSeconds?.reel || 0) / 3600;
+      const eligible = videoWatchHours >= VIDEO_ELIGIBILITY_HOURS && reelWatchHours >= REEL_ELIGIBILITY_HOURS;
+      if (enabled && !eligible) return res.status(403).json({ ok: false, error: 'Earning is not eligible yet. Complete both watch-hour requirements first.', eligible: false });
+      await earningRef.update({ enabled, enabledAt: enabled ? Date.now() : null, videoRatePer1000Views: VIDEO_RATE_PER_1000_VIEWS, reelRatePer1000Views: REEL_RATE_PER_1000_VIEWS });
+      return res.json({ ok: true, earningEnabled: enabled, eligible });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || 'Could not update earning setting.' });
     }
   });
 
