@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import admin from "firebase-admin";
 import { getDatabaseWithUrl } from "firebase-admin/database";
-import { createCloudinarySignature, getCloudinaryConfig } from "./services/cloudinary-signature.js";
+import { createCloudinarySignature, getCloudinaryConfig, destroyCloudinaryVideo } from "./services/cloudinary-signature.js";
 import { cleanupInactiveAccounts } from "./services/account-cleanup.js";
 import { deleteAccountData } from "./services/account-delete.js";
 import { toggleFollow, getFollowStatus } from "./services/social-follow.js";
@@ -149,6 +149,25 @@ app.get("/api/stories", async (req, res) => {
     const stories = Object.values(snapshot.val() || {}).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     return res.json({ ok: true, stories });
   } catch { return res.status(500).json({ ok: false, error: "Could not load stories." }); }
+});
+
+app.post("/api/stories/:storyId/delete", async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const storyId = String(req.params.storyId || "").trim();
+  if (!storyId) return res.status(400).json({ ok: false, error: "Story ID is required." });
+  try {
+    const storyRef = db.ref(`stories/${storyId}`);
+    const snapshot = await storyRef.get();
+    if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Story not found." });
+    const story = snapshot.val() || {};
+    if (String(story.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own story." });
+    if (story.publicId) {
+      try { await destroyCloudinaryVideo(story.publicId); } catch (cloudinaryError) { console.warn("Cloudinary story delete failed:", cloudinaryError?.message || cloudinaryError); }
+    }
+    await storyRef.remove();
+    return res.json({ ok: true, storyId });
+  } catch { return res.status(500).json({ ok: false, error: "Could not delete story." }); }
 });
 
 app.get("/api/account/profile/:username", async (req, res) => {
