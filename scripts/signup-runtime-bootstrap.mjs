@@ -8,16 +8,11 @@ function initFirebase() {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
   if (!clientEmail || !privateKey) return null;
-  return admin.initializeApp({
-    credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
-    databaseURL: process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
-  });
+  return admin.initializeApp({ credential: admin.credential.cert({ projectId, clientEmail, privateKey }), databaseURL: process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com" });
 }
 
 const firebaseApp = initFirebase();
-const db = firebaseApp
-  ? getDatabaseWithUrl(process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com", firebaseApp)
-  : null;
+const db = firebaseApp ? getDatabaseWithUrl(process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com", firebaseApp) : null;
 const auth = firebaseApp ? admin.auth(firebaseApp) : null;
 
 const normalizeUserId = (value) => String(value || "").trim().toLowerCase().replace(/^@/, "");
@@ -29,7 +24,7 @@ async function verifyBearer(req, res) {
   const header = String(req.headers.authorization || "");
   if (!header.startsWith("Bearer ")) { res.status(401).json({ ok: false, error: "Authentication required." }); return null; }
   try { return await auth.verifyIdToken(header.slice(7)); }
-  catch { res.status(401).json({ ok: false, error: "Invalid authentication token." }); return null; }
+  catch (error) { console.error("Signup auth verification failed:", error); res.status(401).json({ ok: false, error: "Invalid authentication token." }); return null; }
 }
 
 async function findTakenUserId(userId, exceptUid = "") {
@@ -44,10 +39,11 @@ async function findTakenUserId(userId, exceptUid = "") {
 }
 
 const originalAppPost = express.application.post;
-if (originalAppPost && db) {
+if (originalAppPost) {
   express.application.post = function signupRuntimePost(path, ...handlers) {
     if (path === "/api/account/check-user-id") {
       const handler = async (req, res) => {
+        if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
         const userId = normalizeUserId(req.body?.userId);
         if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
         try {
@@ -55,7 +51,7 @@ if (originalAppPost && db) {
           return res.json({ ok: true, available: !taken, userId });
         } catch (error) {
           console.error("User ID availability check failed:", error);
-          return res.status(500).json({ ok: false, error: "Could not check User ID. Please try again." });
+          return res.status(500).json({ ok: false, error: "Could not check User ID. Please try again.", detail: String(error?.message || error || "Unknown error") });
         }
       };
       return originalAppPost.call(this, path, handler);
@@ -69,6 +65,7 @@ if (originalAppPost && db) {
         const uid = String(user.uid || "").trim();
         const userId = normalizeUserId(req.body?.userId);
         const name = String(req.body?.name || "").trim().slice(0, 120);
+        const accountType = String(req.body?.accountType || "public") === "private" ? "private" : "public";
         if (!uid) return res.status(400).json({ ok: false, error: "User is required." });
         if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
         if (!name) return res.status(400).json({ ok: false, error: "User Name is required." });
@@ -85,26 +82,27 @@ if (originalAppPost && db) {
             name,
             displayName: name,
             bio: String(previous.profile?.bio || previous.bio || "").slice(0, 160),
-            accountType: "public",
+            accountType,
             isVerified: Boolean(previous.profile?.isVerified || previous.isVerified),
             createdAt: previous.profile?.createdAt || previous.createdAt || now,
             updatedAt: now,
           };
-          const profilePrivate = {
-            ...(previous.profilePrivate || {}),
-            email: user.email || previous.profilePrivate?.email || previous.email || "",
-          };
+          const profilePrivate = { ...(previous.profilePrivate || {}), email: user.email || previous.profilePrivate?.email || previous.email || "" };
           const updates = {
             [`users/${uid}/profile`]: profile,
             [`users/${uid}/profilePrivate`]: profilePrivate,
             [`users/${uid}/userId`]: `@${userId}`,
             [`users/${uid}/username`]: `@${userId}`,
             [`users/${uid}/name`]: name,
-            [`users/${uid}/accountType`]: "public",
+            [`users/${uid}/accountType`]: accountType,
             [`users/${uid}/updatedAt`]: now,
             [`usernames/${userIdKey(userId)}`]: { uid, username: `@${userId}`, updatedAt: now },
           };
           await db.ref().update(updates);
+          const verify = await userRef.get();
+          if (!verify.exists() || normalizeUserId(verify.val()?.profile?.userId) !== userId) {
+            throw new Error("Canonical profile write could not be verified.");
+          }
           return res.status(201).json({ ok: true, profile });
         } catch (error) {
           console.error("Canonical user ID claim failed:", error);
