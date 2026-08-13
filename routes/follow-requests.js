@@ -7,9 +7,26 @@ function entryList(snapshot) {
     .filter((item) => item && item.uid)
     .map((item) => ({
       uid: String(item.uid),
-      userId: String(item.userId || ""),
+      userId: String(item.userId || item.username || ""),
       name: String(item.name || "Indo User"),
     }));
+}
+
+async function resolveTargetUid(db, rawTarget) {
+  const value = String(rawTarget || "").trim();
+  if (!value) return "";
+  const direct = await db.ref(`users/${value}`).get();
+  if (direct.exists()) return value;
+  const normalized = value.toLowerCase().replace(/^@/, "");
+  const encoded = normalized
+    .replace(/\./g, "%2E")
+    .replace(/#/g, "%23")
+    .replace(/\$/g, "%24")
+    .replace(/\//g, "%2F")
+    .replace(/\[/g, "%5B")
+    .replace(/\]/g, "%5D");
+  const claim = await db.ref(`usernames/${encoded}`).get();
+  return String(claim.val()?.uid || "");
 }
 
 export function createFollowRequestsRouter({ db, requireUser }) {
@@ -18,14 +35,17 @@ export function createFollowRequestsRouter({ db, requireUser }) {
   router.get("/social/follow-requests", async (req, res) => {
     const user = await requireUser(req, res);
     if (!user) return;
-    if (!db)
-      return res.status(503).json({ ok: false, error: "Firebase Admin is not configured on the backend." });
+    if (!db) return res.status(503).json({ ok: false, error: "Firebase Admin is not configured on the backend." });
     try {
       const [incomingSnapshot, outgoingSnapshot] = await Promise.all([
         db.ref(`users/${user.uid}/followRequests`).get(),
         db.ref(`users/${user.uid}/sentFollowRequests`).get(),
       ]);
-      return res.json({ ok: true, incoming: Object.values(incomingSnapshot.val() || {}), outgoing: Object.values(outgoingSnapshot.val() || {}) });
+      return res.json({
+        ok: true,
+        incoming: Object.values(incomingSnapshot.val() || {}),
+        outgoing: Object.values(outgoingSnapshot.val() || {}),
+      });
     } catch (error) {
       return res.status(500).json({ ok: false, error: error.message || "Could not load follow requests." });
     }
@@ -34,8 +54,7 @@ export function createFollowRequestsRouter({ db, requireUser }) {
   router.post("/social/follow-requests/:requesterUid", async (req, res) => {
     const user = await requireUser(req, res);
     if (!user) return;
-    if (!db)
-      return res.status(503).json({ ok: false, error: "Firebase Admin is not configured on the backend." });
+    if (!db) return res.status(503).json({ ok: false, error: "Firebase Admin is not configured on the backend." });
     const requesterUid = String(req.params.requesterUid || "").trim();
     const accept = req.body?.accept === true;
     if (!requesterUid) return res.status(400).json({ ok: false, error: "Requester is required." });
@@ -79,21 +98,24 @@ export function createFollowRequestsRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db) return res.status(503).json({ ok: false, error: "Firebase Admin is not configured on the backend." });
-    const targetUid = String(req.params.targetUid || "").trim();
-    if (!targetUid) return res.status(400).json({ ok: false, error: "Target user is required." });
+    const rawTarget = String(req.params.targetUid || "").trim();
+    if (!rawTarget) return res.status(400).json({ ok: false, error: "Target user is required." });
     try {
+      const targetUid = await resolveTargetUid(db, rawTarget);
+      if (!targetUid) return res.status(404).json({ ok: false, error: "Profile not found." });
       const targetSnapshot = await db.ref(`users/${targetUid}`).get();
       if (!targetSnapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
       if (String(user.uid) !== targetUid) {
         const target = targetSnapshot.val() || {};
-        const isPrivate = target.accountType === "private";
-        if (isPrivate) {
+        if (target.accountType === "private") {
           const follower = await db.ref(`users/${targetUid}/followers/${user.uid}`).get();
           if (!follower.exists()) return res.status(403).json({ ok: false, error: "Follow this private account to view its followers/following." });
         }
       }
-      const snapshot = await db.ref(`users/${targetUid}/${relation}`).get();
-      const items = entryList(snapshot);
+      const relationSnapshot = await db.ref(`users/${targetUid}/${relation}`).get();
+      const items = entryList(relationSnapshot);
+      const countPath = relation === "followers" ? "followersCount" : "followingCount";
+      await db.ref(`users/${targetUid}/${countPath}`).set(items.length);
       return res.json({ ok: true, targetUid, relation, count: items.length, items });
     } catch (error) {
       return res.status(500).json({ ok: false, error: error.message || `Could not load ${relation}.` });
