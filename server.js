@@ -7,6 +7,8 @@ import { createCloudinarySignature, getCloudinaryConfig, destroyCloudinaryVideo 
 import { cleanupInactiveAccounts } from "./services/account-cleanup.js";
 import { deleteAccountData } from "./services/account-delete.js";
 import { toggleFollow, getFollowStatus } from "./services/social-follow.js";
+import { canonicalUserRoot, migrateAllUsersToCanonical, syncCanonicalUser } from "./services/user-canonical.js";
+import { saveCanonicalVideo, updateCanonicalVideoViews, deleteCanonicalVideo, saveCanonicalStory, deleteCanonicalStory } from "./services/canonical-content.js";
 import { createAccountContactRouter } from "./routes/account-contact.js";
 import { createAccountVisibilityRouter } from "./routes/account-visibility.js";
 import { createMediaEngagementRouter } from "./routes/media-engagement.js";
@@ -19,7 +21,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260813-followers-v4";
+const BACKEND_VERSION = "20260813-canonical-v1";
 const PRODUCTION_FRONTEND_ORIGINS = ["https://yashwanthputtarajegowda.github.io"];
 const CORS_ORIGINS = Array.from(new Set([
   ...PRODUCTION_FRONTEND_ORIGINS,
@@ -97,10 +99,13 @@ app.post("/api/media/videos", async (req, res) => {
   const caption = String(req.body?.caption || "").trim().slice(0, 500);
   if (!publicId || !secureUrl || !/^https:\/\//i.test(secureUrl)) return res.status(400).json({ ok: false, error: "Uploaded video could not be published." });
   try {
-    const profile = (await db.ref(`users/${user.uid}`).get()).val() || {};
+    const profile = (await syncCanonicalUser({ db, uid: user.uid, includeContent: false })).profile;
     const videoRef = db.ref("videos").push();
     const video = { id: videoRef.key, mediaType, ownerUid: user.uid, creator: profile.username || `@${user.uid.slice(0, 8)}`, creatorName: profile.name || "Indo User", title: title || (mediaType === "reel" ? "Untitled reel" : "Untitled video"), caption, publicId, secureUrl, videoUrl: secureUrl, duration: Number(req.body?.duration || 0), width: Number(req.body?.width || 0), height: Number(req.body?.height || 0), views: 0, likes: 0, createdAt: admin.database.ServerValue.TIMESTAMP };
     await videoRef.set(video);
+    await saveCanonicalVideo({ db, uid: user.uid, video: { ...video, createdAt: Date.now() } });
+    await db.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => (Number(current) || 0) + 1);
+    await db.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).transaction((current) => (Number(current) || 0) + 1);
     return res.status(201).json({ ok: true, video });
   } catch { return res.status(500).json({ ok: false, error: "Could not publish the video." }); }
 });
@@ -126,7 +131,9 @@ app.post("/api/media/videos/:videoId/view", async (req, res) => {
   try {
     const videoRef = db.ref(`videos/${videoId}`); const snapshot = await videoRef.get();
     if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Video not found." });
+    const video = snapshot.val() || {};
     const result = await videoRef.child("views").transaction((current) => (Number(current) || 0) + 1);
+    await updateCanonicalVideoViews({ db, uid: video.ownerUid, videoId, views: Number(result.snapshot.val()) || 0 });
     return res.json({ ok: true, videoId, views: Number(result.snapshot.val()) || 0 });
   } catch { return res.status(500).json({ ok: false, error: "Could not record video view." }); }
 });
@@ -143,6 +150,9 @@ app.post("/api/media/videos/:videoId/delete", async (req, res) => {
     const video = snapshot.val() || {};
     if (String(video.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own video." });
     await videoRef.remove();
+    await deleteCanonicalVideo({ db, uid: user.uid, videoId });
+    await db.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
+    await db.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
     let cloudinaryDeleted = false;
     let cloudinaryError = "";
     if (video.publicId) {
@@ -162,9 +172,9 @@ app.post("/api/stories", async (req, res) => {
   const publicId = String(req.body?.publicId || "").trim(); const secureUrl = String(req.body?.secureUrl || "").trim();
   if (!publicId || !secureUrl) return res.status(400).json({ ok: false, error: "Uploaded story data is required." });
   try {
-    const profile = (await db.ref(`users/${user.uid}`).get()).val() || {}; const ref = db.ref("stories").push();
+    const profile = (await syncCanonicalUser({ db, uid: user.uid, includeContent: false })).profile; const ref = db.ref("stories").push();
     const story = { id: ref.key, ownerUid: user.uid, username: profile.username || `@${user.uid.slice(0, 8)}`, name: profile.name || "Indo User", publicId, secureUrl, createdAt: Date.now(), expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
-    await ref.set(story); return res.status(201).json({ ok: true, story });
+    await ref.set(story); await saveCanonicalStory({ db, uid: user.uid, story }); return res.status(201).json({ ok: true, story });
   } catch { return res.status(500).json({ ok: false, error: "Could not save story." }); }
 });
 
@@ -189,7 +199,7 @@ app.post("/api/stories/:storyId/delete", async (req, res) => {
     if (!snapshot.exists()) return res.json({ ok: true, storyId, alreadyDeleted: true, cloudinaryDeleted: false });
     const story = snapshot.val() || {};
     if (String(story.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own story." });
-    await storyRef.remove();
+    await storyRef.remove(); await deleteCanonicalStory({ db, uid: user.uid, storyId });
     let cloudinaryDeleted = false;
     let cloudinaryError = "";
     if (story.publicId) {
@@ -207,16 +217,19 @@ app.get("/api/account/profile/:username", async (req, res) => {
   try {
     const claim = await db.ref(`usernames/${userIdKey(username)}`).get();
     if (!claim.exists() || !claim.val()?.uid) return res.status(404).json({ ok: false, error: "Profile not found." });
-    const profileSnapshot = await db.ref(`users/${claim.val().uid}`).get();
-    if (!profileSnapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
-    return res.json({ ok: true, profile: profileSnapshot.val() });
-  } catch { return res.status(500).json({ ok: false, error: "Could not load profile." });
-  }
+    const targetUid = String(claim.val().uid);
+    const canonical = await syncCanonicalUser({ db, uid: targetUid, includeContent: true });
+    const publicProfile = { ...canonical.profile, accountType: canonical.settings.accountType };
+    return res.json({ ok: true, profile: publicProfile, stats: canonical.stats, social: canonical.social });
+  } catch { return res.status(500).json({ ok: false, error: "Could not load profile." }); }
 });
 
 app.get("/api/account/me", async (req, res) => {
   const user = await requireUser(req, res); if (!user) return; if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
-  try { const snapshot = await db.ref(`users/${user.uid}`).get(); if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." }); return res.json({ ok: true, profile: snapshot.val() }); }
+  try {
+    const canonical = await syncCanonicalUser({ db, uid: user.uid, includeContent: true });
+    return res.json({ ok: true, profile: canonical.profile, stats: canonical.stats, social: canonical.social, private: canonical.profilePrivate });
+  }
   catch { return res.status(500).json({ ok: false, error: "Could not load profile." }); }
 });
 
@@ -224,14 +237,26 @@ app.patch("/api/account/profile", async (req, res) => {
   const user = await requireUser(req, res); if (!user) return; if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
   const name = String(req.body?.name || "").trim(); const bio = String(req.body?.bio || "").trim().slice(0, 160);
   if (!name) return res.status(400).json({ ok: false, error: "User Name is required." });
-  try { const userRef = db.ref(`users/${user.uid}`); const previous = (await userRef.get()).val() || {}; await userRef.update({ name, bio }); return res.json({ ok: true, profile: { ...previous, name, bio } }); }
+  try {
+    const userRef = db.ref(`users/${user.uid}`);
+    const previous = (await userRef.get()).val() || {};
+    const nextProfile = { ...(previous.profile || {}), uid: user.uid, name, bio };
+    await userRef.update({ name, bio, profile: nextProfile, updatedAt: Date.now(), 'profile/updatedAt': Date.now() });
+    return res.json({ ok: true, profile: nextProfile });
+  }
   catch { return res.status(500).json({ ok: false, error: "Could not update profile." }); }
 });
 
 app.use((error, _req, res, _next) => { console.error(error); if (res.headersSent) return; return res.status(500).json({ ok: false, error: error?.message || "Internal server error." }); });
 
 async function start() {
-  if (firebaseAdmin && db) { try { await cleanupInactiveAccounts({ db, auth }); } catch (error) { console.warn("Account cleanup failed:", error?.message || error); } }
+  if (firebaseAdmin && db) {
+    try {
+      const schemaSnapshot = await db.ref("system/canonicalSchemaVersion/version").get();
+      if (Number(schemaSnapshot.val() || 0) < 2) await migrateAllUsersToCanonical({ db });
+    } catch (error) { console.warn("Canonical user migration failed:", error?.message || error); }
+    try { await cleanupInactiveAccounts({ db, auth }); } catch (error) { console.warn("Account cleanup failed:", error?.message || error); }
+  }
   app.listen(PORT, () => console.log(`Indo backend listening on port ${PORT}`));
   setInterval(() => { cleanupInactiveAccounts({ db, auth }).catch((error) => console.warn("Scheduled account cleanup failed:", error?.message || error)); }, CLEANUP_INTERVAL_MS).unref?.();
 }
