@@ -25,3 +25,31 @@ export function getCloudinaryConfig() {
     throw new Error("Cloudinary cloud name or API key is not configured.");
   return { cloudName, apiKey };
 }
+
+export async function destroyCloudinaryVideo(publicId) {
+  const id = String(publicId || "").trim();
+  if (!id) return;
+  const timestamp = Math.floor(Date.now() / 1000);
+  const { cloudName, apiKey } = getCloudinaryConfig();
+  const signature = createCloudinarySignature(timestamp, {
+    public_id: id,
+    invalidate: true,
+    type: "upload",
+  });
+  const body = new URLSearchParams({
+    public_id: id,
+    api_key: apiKey,
+    timestamp: String(timestamp),
+    signature,
+    invalidate: "true",
+    type: "upload",
+  });
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/video/destroy`,
+    { method: "POST", body },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.result === "error") {
+    throw new Error(data.error?.message || "Cloudinary story deletion failed.");
+  }
+}
