@@ -1,15 +1,22 @@
-const PROFILE_FIELDS = ['uid','username','userId','name','displayName','bio','photoURL','avatarUrl','email','phoneNumber','mobile','createdAt','updatedAt','accountType','isVerified'];
+const PROFILE_FIELDS = ['uid','username','userId','name','displayName','bio','photoURL','avatarUrl','createdAt','updatedAt','accountType','isVerified'];
 
 function compact(value) {
-  const out = {};
-  for (const [key, item] of Object.entries(value || {})) {
-    if (item !== undefined && item !== null && item !== '') out[key] = item;
-  }
-  return out;
+  return Object.fromEntries(Object.entries(value || {}).filter(([, item]) => item !== undefined && item !== null && item !== ''));
 }
 
 export function canonicalUserRoot(uid) {
-  return `users/${String(uid).trim()}`;
+  return `users/${String(uid || '').trim()}`;
+}
+
+function legacyUserValue(user = {}, field) {
+  return user?.profile?.[field] ?? user?.[field];
+}
+
+async function readRelation(db, uid, relation) {
+  const canonical = await db.ref(`${canonicalUserRoot(uid)}/social/${relation}`).get();
+  if (canonical.exists()) return canonical.val() || {};
+  const legacy = await db.ref(`${canonicalUserRoot(uid)}/${relation}`).get();
+  return legacy.val() || {};
 }
 
 export async function syncCanonicalUser({ db, uid, includeContent = true }) {
@@ -21,52 +28,76 @@ export async function syncCanonicalUser({ db, uid, includeContent = true }) {
   if (!userSnapshot.exists()) throw new Error('Profile not found.');
   const user = userSnapshot.val() || {};
 
-  const [followersSnapshot, followingSnapshot, verificationSnapshot] = await Promise.all([
-    userRef.child('followers').get(),
-    userRef.child('following').get(),
+  const [followers, following, verificationSnapshot] = await Promise.all([
+    readRelation(db, cleanUid, 'followers'),
+    readRelation(db, cleanUid, 'following'),
     userRef.child('verification').get(),
   ]);
 
-  const followers = followersSnapshot.val() || {};
-  const following = followingSnapshot.val() || {};
-  const verification = verificationSnapshot.val() || {};
-  const followersCount = Object.keys(followers).length;
-  const followingCount = Object.keys(following).length;
+  const verification = verificationSnapshot.val() || user.verification || {};
+  const contentVideos = {};
+  const contentStories = {};
+  const engagementVideos = {};
 
-  const profile = compact(Object.fromEntries(PROFILE_FIELDS
-    .filter((field) => user[field] !== undefined)
-    .map((field) => [field, user[field]])));
+  if (includeContent) {
+    const [videosSnapshot, storiesSnapshot, likesSnapshot, commentsSnapshot, savesSnapshot] = await Promise.all([
+      db.ref('videos').get(),
+      db.ref('stories').get(),
+      db.ref('videoLikes').get(),
+      db.ref('videoComments').get(),
+      db.ref('videoSaves').get(),
+    ]);
+    const videos = videosSnapshot.val() || {};
+    const likes = likesSnapshot.val() || {};
+    const comments = commentsSnapshot.val() || {};
+    const saves = savesSnapshot.val() || {};
+
+    for (const [id, item] of Object.entries(videos)) {
+      if (!item || String(item.ownerUid || '') !== cleanUid) continue;
+      const video = { ...item, id: String(item.id || id) };
+      contentVideos[id] = video;
+      engagementVideos[id] = {
+        likes: likes[id] || {},
+        comments: comments[id] || {},
+        saves: saves[id] || {},
+        views: Number(video.views || 0),
+        likesCount: Object.keys(likes[id] || {}).length,
+        commentsCount: Object.keys(comments[id] || {}).length,
+        savesCount: Object.keys(saves[id] || {}).length,
+      };
+    }
+    for (const [id, item] of Object.entries(stories)) {
+      if (!item || String(item.ownerUid || '') !== cleanUid) continue;
+      contentStories[id] = { ...item, id: String(item.id || id) };
+    }
+  }
+
+  const profile = compact(Object.fromEntries(PROFILE_FIELDS.map((field) => [field, legacyUserValue(user, field)])));
   profile.uid = cleanUid;
   profile.username = profile.username || user.username || user.userId || '';
 
-  const contentVideos = {};
-  const contentStories = {};
-  let postsCount = 0;
-
-  if (includeContent) {
-    const [videosSnapshot, storiesSnapshot] = await Promise.all([
-      db.ref('videos').get(),
-      db.ref('stories').get(),
-    ]);
-    for (const item of Object.values(videosSnapshot.val() || {})) {
-      if (!item || String(item.ownerUid || '') !== cleanUid) continue;
-      const id = String(item.id || '').trim();
-      if (!id) continue;
-      contentVideos[id] = item;
-      postsCount += 1;
-    }
-    for (const [id, item] of Object.entries(storiesSnapshot.val() || {})) {
-      if (!item || String(item.ownerUid || '') !== cleanUid) continue;
-      contentStories[id] = item;
-    }
+  const followersCount = Object.keys(followers).length;
+  const followingCount = Object.keys(following).length;
+  const postsCount = Object.keys(contentVideos).length;
+  const storiesCount = Object.keys(contentStories).length;
+  let viewsCount = 0;
+  let likesCount = 0;
+  let commentsCount = 0;
+  let savesCount = 0;
+  for (const engagement of Object.values(engagementVideos)) {
+    viewsCount += Number(engagement.views || 0);
+    likesCount += Number(engagement.likesCount || 0);
+    commentsCount += Number(engagement.commentsCount || 0);
+    savesCount += Number(engagement.savesCount || 0);
   }
 
   const canonical = {
     profile,
-    settings: {
-      accountType: user.accountType || 'public',
-    },
     verification,
+    settings: {
+      ...(user.settings || {}),
+      accountType: user.settings?.accountType || user.accountType || 'public',
+    },
     social: {
       followers,
       following,
@@ -74,27 +105,28 @@ export async function syncCanonicalUser({ db, uid, includeContent = true }) {
       followingCount,
     },
     content: {
+      posts: contentVideos,
       videos: contentVideos,
       stories: contentStories,
     },
+    engagement: {
+      videos: engagementVideos,
+    },
     stats: {
+      postsCount,
+      videosCount: postsCount,
+      storiesCount,
       followersCount,
       followingCount,
-      postsCount,
-      storiesCount: Object.keys(contentStories).length,
+      viewsCount,
+      likesCount,
+      commentsCount,
+      savesCount,
       updatedAt: Date.now(),
     },
   };
 
-  await userRef.update({
-    profile: canonical.profile,
-    settings: canonical.settings,
-    verification: canonical.verification,
-    social: canonical.social,
-    content: canonical.content,
-    stats: canonical.stats,
-  });
-
+  await userRef.update(canonical);
   return canonical;
 }
 
@@ -105,4 +137,97 @@ export function canonicalFollowUpdate({ followerUid, targetUid, followerEntry, t
   update[`${followerRoot}/social/following/${targetUid}`] = follow ? targetEntry : null;
   update[`${targetRoot}/social/followers/${followerUid}`] = follow ? followerEntry : null;
   return update;
+}
+
+export async function migrateAllUsersToCanonical({ db }) {
+  if (!db) throw new Error('Firebase database is not configured.');
+  const usersSnapshot = await db.ref('users').get();
+  const users = usersSnapshot.val() || {};
+  const updates = {};
+
+  const [videosSnapshot, storiesSnapshot, likesSnapshot, commentsSnapshot, savesSnapshot] = await Promise.all([
+    db.ref('videos').get(),
+    db.ref('stories').get(),
+    db.ref('videoLikes').get(),
+    db.ref('videoComments').get(),
+    db.ref('videoSaves').get(),
+  ]);
+  const videos = videosSnapshot.val() || {};
+  const stories = storiesSnapshot.val() || {};
+  const likes = likesSnapshot.val() || {};
+  const comments = commentsSnapshot.val() || {};
+  const saves = savesSnapshot.val() || {};
+
+  const byOwnerVideos = {};
+  const byOwnerStories = {};
+  const byOwnerEngagement = {};
+  for (const [id, video] of Object.entries(videos)) {
+    const ownerUid = String(video?.ownerUid || '').trim();
+    if (!ownerUid) continue;
+    byOwnerVideos[ownerUid] ||= {};
+    byOwnerEngagement[ownerUid] ||= {};
+    byOwnerVideos[ownerUid][id] = { ...video, id: String(video.id || id) };
+    byOwnerEngagement[ownerUid][id] = {
+      likes: likes[id] || {},
+      comments: comments[id] || {},
+      saves: saves[id] || {},
+      views: Number(video.views || 0),
+      likesCount: Object.keys(likes[id] || {}).length,
+      commentsCount: Object.keys(comments[id] || {}).length,
+      savesCount: Object.keys(saves[id] || {}).length,
+    };
+  }
+  for (const [id, story] of Object.entries(stories)) {
+    const ownerUid = String(story?.ownerUid || '').trim();
+    if (!ownerUid) continue;
+    byOwnerStories[ownerUid] ||= {};
+    byOwnerStories[ownerUid][id] = { ...story, id: String(story.id || id) };
+  }
+
+  for (const uid of Object.keys(users)) {
+    const root = canonicalUserRoot(uid);
+    const user = users[uid] || {};
+    const followers = user.social?.followers || user.followers || {};
+    const following = user.social?.following || user.following || {};
+    const profile = compact(Object.fromEntries(PROFILE_FIELDS.map((field) => [field, legacyUserValue(user, field)])));
+    profile.uid = uid;
+    profile.username = profile.username || user.username || user.userId || '';
+    const userVideos = byOwnerVideos[uid] || {};
+    const userStories = byOwnerStories[uid] || {};
+    const userEngagement = byOwnerEngagement[uid] || {};
+    let viewsCount = 0, likesCount = 0, commentsCount = 0, savesCount = 0;
+    for (const engagement of Object.values(userEngagement)) {
+      viewsCount += Number(engagement.views || 0);
+      likesCount += Number(engagement.likesCount || 0);
+      commentsCount += Number(engagement.commentsCount || 0);
+      savesCount += Number(engagement.savesCount || 0);
+    }
+    updates[`${root}/profile`] = profile;
+    updates[`${root}/verification`] = user.verification || {};
+    updates[`${root}/settings`] = { ...(user.settings || {}), accountType: user.settings?.accountType || user.accountType || 'public' };
+    updates[`${root}/social`] = {
+      followers,
+      following,
+      followersCount: Object.keys(followers).length,
+      followingCount: Object.keys(following).length,
+    };
+    updates[`${root}/content`] = { posts: userVideos, videos: userVideos, stories: userStories };
+    updates[`${root}/engagement`] = { videos: userEngagement };
+    updates[`${root}/stats`] = {
+      postsCount: Object.keys(userVideos).length,
+      videosCount: Object.keys(userVideos).length,
+      storiesCount: Object.keys(userStories).length,
+      followersCount: Object.keys(followers).length,
+      followingCount: Object.keys(following).length,
+      viewsCount,
+      likesCount,
+      commentsCount,
+      savesCount,
+      updatedAt: Date.now(),
+    };
+  }
+
+  if (Object.keys(updates).length) await db.ref().update(updates);
+  await db.ref('system/canonicalSchemaVersion').set({ version: 2, migratedAt: Date.now(), users: Object.keys(users).length });
+  return { ok: true, users: Object.keys(users).length };
 }
