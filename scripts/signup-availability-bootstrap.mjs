@@ -19,25 +19,25 @@ const db = firebaseApp
   ? getDatabaseWithUrl(process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com", firebaseApp)
   : null;
 
-const routerProbe = express.Router();
-const originalRouterPost = express.Router.prototype?.post || routerProbe.post;
+const probeRouter = express.Router();
+const originalRouterPost = express.Router.prototype.post || probeRouter.post;
 
 function normalizeUserId(value) {
   return String(value || "").trim().toLowerCase().replace(/^@/, "");
 }
 
-function userIdKey(userId) {
-  return String(userId || "")
-    .replace(/\./g, "%2E")
-    .replace(/#/g, "%23")
-    .replace(/\$/g, "%24")
-    .replace(/\//g, "%2F")
-    .replace(/\[/g, "%5B")
-    .replace(/\]/g, "%5D");
-}
-
 function validUserId(userId) {
   return /^[a-z0-9._-]{1,50}$/.test(userId);
+}
+
+function extractUserId(user = {}) {
+  return normalizeUserId(
+    user?.profile?.userId ||
+    user?.profile?.username ||
+    user?.userId ||
+    user?.username ||
+    "",
+  );
 }
 
 if (express.Router.prototype?.post) {
@@ -48,8 +48,12 @@ if (express.Router.prototype?.post) {
         const userId = normalizeUserId(req.body?.userId);
         if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
         try {
-          const snapshot = await db.ref(`usernames/${userIdKey(userId)}`).get();
-          return res.json({ ok: true, available: !snapshot.exists(), userId });
+          // Canonical schema source-of-truth: users/{uid}/profile.userId.
+          // Read the user collection and compare against the canonical profile value.
+          const snapshot = await db.ref("users").get();
+          const users = snapshot.val() || {};
+          const taken = Object.values(users).some((user) => extractUserId(user) === userId);
+          return res.json({ ok: true, available: !taken, userId });
         } catch (error) {
           console.error("User ID availability check failed:", error);
           return res.status(500).json({ ok: false, error: "Could not check User ID. Please try again." });
