@@ -1,0 +1,1 @@
+Video owner canonical fix pending wiring: load scripts/pre-bootstrap-video-owner.mjs before force-canonical-bootstrap.mjs.
