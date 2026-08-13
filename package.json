@@ -1,10 +1,10 @@
 {
   "name": "indo-backend",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node scripts/signup-runtime-bootstrap.mjs",
+    "start": "node server.js",
     "preflight:production": "node scripts/production-preflight.mjs"
   },
   "dependencies": {
