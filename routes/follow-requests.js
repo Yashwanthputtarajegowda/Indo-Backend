@@ -1,5 +1,6 @@
 import express from "express";
 import { respondToFollowRequest, toggleFollow, getFollowStatus } from "../services/social-follow.js";
+import { syncCanonicalUser } from "../services/user-canonical.js";
 
 function entryList(snapshot) {
   const value = snapshot?.val?.() || {};
@@ -94,6 +95,35 @@ export function createFollowRequestsRouter({ db, requireUser }) {
     }
   });
 
+  router.get("/social/profile/:targetUid", async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: "Firebase Admin is not configured on the backend." });
+    try {
+      const targetUid = await resolveTargetUid(db, req.params.targetUid);
+      if (!targetUid) return res.status(404).json({ ok: false, error: "Profile not found." });
+      const canonical = await syncCanonicalUser({ db, uid: targetUid, includeContent: true });
+      const publicProfile = {
+        ...canonical.profile,
+        accountType: canonical.settings.accountType,
+      };
+      return res.json({
+        ok: true,
+        targetUid,
+        profile: publicProfile,
+        stats: canonical.stats,
+        social: {
+          followersCount: canonical.stats.followersCount,
+          followingCount: canonical.stats.followingCount,
+        },
+        videos: Object.values(canonical.content.videos),
+        stories: Object.values(canonical.content.stories),
+      });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || "Could not load profile." });
+    }
+  });
+
   async function listRelationship(req, res, relation) {
     const user = await requireUser(req, res);
     if (!user) return;
@@ -103,19 +133,16 @@ export function createFollowRequestsRouter({ db, requireUser }) {
     try {
       const targetUid = await resolveTargetUid(db, rawTarget);
       if (!targetUid) return res.status(404).json({ ok: false, error: "Profile not found." });
-      const targetSnapshot = await db.ref(`users/${targetUid}`).get();
-      if (!targetSnapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
-      if (String(user.uid) !== targetUid) {
-        const target = targetSnapshot.val() || {};
-        if (target.accountType === "private") {
-          const follower = await db.ref(`users/${targetUid}/followers/${user.uid}`).get();
-          if (!follower.exists()) return res.status(403).json({ ok: false, error: "Follow this private account to view its followers/following." });
-        }
+      const canonical = await syncCanonicalUser({ db, uid: targetUid, includeContent: false });
+      if (String(user.uid) !== targetUid && canonical.settings.accountType === "private") {
+        const follower = await db.ref(`users/${targetUid}/social/followers/${user.uid}`).get();
+        const legacyFollower = follower.exists()
+          ? follower
+          : await db.ref(`users/${targetUid}/followers/${user.uid}`).get();
+        if (!legacyFollower.exists()) return res.status(403).json({ ok: false, error: "Follow this private account to view its followers/following." });
       }
-      const relationSnapshot = await db.ref(`users/${targetUid}/${relation}`).get();
-      const items = entryList(relationSnapshot);
-      const countPath = relation === "followers" ? "followersCount" : "followingCount";
-      await db.ref(`users/${targetUid}/${countPath}`).set(items.length);
+      const relationItems = relation === "followers" ? canonical.social.followers : canonical.social.following;
+      const items = entryList({ val: () => relationItems });
       return res.json({ ok: true, targetUid, relation, count: items.length, items });
     } catch (error) {
       return res.status(500).json({ ok: false, error: error.message || `Could not load ${relation}.` });
