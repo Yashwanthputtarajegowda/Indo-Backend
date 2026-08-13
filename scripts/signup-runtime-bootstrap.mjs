@@ -1,3 +1,4 @@
 // Stable production entrypoint.
-// Load video-owner metadata first, then canonical migration/story/server bootstrap.
-await import("./pre-bootstrap-video-owner.mjs");
+// Keep the existing npm start contract, but run the real Express server directly.
+// No Express prototype monkey-patches or DOM-style bootstrap layers are used.
+await import('../server.js');
