@@ -129,6 +129,26 @@ app.post("/api/media/videos/:videoId/view", async (req, res) => {
   } catch { return res.status(500).json({ ok: false, error: "Could not record video view." }); }
 });
 
+app.post("/api/media/videos/:videoId/delete", async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const videoId = String(req.params.videoId || "").trim();
+  if (!videoId) return res.status(400).json({ ok: false, error: "Video ID is required." });
+  try {
+    const videoRef = db.ref(`videos/${videoId}`);
+    const snapshot = await videoRef.get();
+    if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Video not found." });
+    const video = snapshot.val() || {};
+    if (String(video.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own video." });
+    if (video.publicId) {
+      try { await destroyCloudinaryVideo(video.publicId); }
+      catch (cloudinaryError) { console.warn("Cloudinary video delete failed:", cloudinaryError?.message || cloudinaryError); }
+    }
+    await videoRef.remove();
+    return res.json({ ok: true, videoId });
+  } catch { return res.status(500).json({ ok: false, error: "Could not delete video." }); }
+});
+
 app.post("/api/stories", async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
   if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
