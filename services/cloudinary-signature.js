@@ -53,3 +53,5 @@ export async function destroyCloudinaryVideo(publicId) {
     throw new Error(data.error?.message || "Cloudinary story deletion failed.");
   }
 }
+
+// Keep this module as the Cloudinary story-delete deploy trigger used by Railway.
