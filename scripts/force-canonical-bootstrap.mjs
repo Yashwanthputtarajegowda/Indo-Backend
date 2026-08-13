@@ -30,3 +30,5 @@ if (!app) {
     console.log(`[canonical-migration] version ${version} already active`);
   }
 }
+
+await import("../server.js");
