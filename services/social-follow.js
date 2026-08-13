@@ -1,4 +1,5 @@
 import { createNotification } from "./notifications.js";
+import { canonicalFollowUpdate } from "./user-canonical.js";
 
 async function syncFollowCounts({ db, followerUid, targetUid }) {
   const [followingSnapshot, followersSnapshot] = await Promise.all([
@@ -14,6 +15,8 @@ async function syncFollowCounts({ db, followerUid, targetUid }) {
   await db.ref().update({
     [`users/${followerUid}/followingCount`]: followingCount,
     [`users/${targetUid}/followersCount`]: followersCount,
+    [`users/${followerUid}/social/followingCount`]: followingCount,
+    [`users/${targetUid}/social/followersCount`]: followersCount,
   });
   return { followingCount, followersCount };
 }
@@ -47,6 +50,7 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
   const targetPath = `users/${targetUid}/followers/${followerUid}`;
   const requestPath = `users/${targetUid}/followRequests/${followerUid}`;
   const outgoingPath = `users/${followerUid}/sentFollowRequests/${targetUid}`;
+  const canonicalUpdate = canonicalFollowUpdate({ followerUid, targetUid, followerEntry, targetEntry, follow });
   const alreadyFollowing = followerSnapshot
     .child(`following/${targetUid}`)
     .exists();
@@ -99,6 +103,7 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
     await db.ref().update({
       [followerPath]: targetEntry,
       [targetPath]: followerEntry,
+      ...canonicalUpdate,
       [requestPath]: null,
       [outgoingPath]: null,
     });
@@ -117,6 +122,7 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
     await db.ref().update({
       [followerPath]: null,
       [targetPath]: null,
+      ...canonicalUpdate,
       [requestPath]: null,
       [outgoingPath]: null,
     });
@@ -138,7 +144,8 @@ export async function getFollowStatus({ db, followerUid, targetUid }) {
     db.ref(`users/${followerUid}`).get(),
     db.ref(`users/${targetUid}`).get(),
   ]);
-  const following = followerSnapshot.child(`following/${targetUid}`).exists();
+  const following = followerSnapshot.child(`following/${targetUid}`).exists()
+    || followerSnapshot.child(`social/following/${targetUid}`).exists();
   const pending = targetSnapshot
     .child(`followRequests/${followerUid}`)
     .exists();
@@ -181,6 +188,7 @@ export async function respondToFollowRequest({
   const outgoingPath = `users/${requesterUid}/sentFollowRequests/${ownerUid}`;
   const followerPath = `users/${ownerUid}/followers/${requesterUid}`;
   const followingPath = `users/${requesterUid}/following/${ownerUid}`;
+  const canonicalUpdate = canonicalFollowUpdate({ followerUid: requesterUid, targetUid: ownerUid, followerEntry: requesterEntry, targetEntry: ownerEntry, follow: accept });
   if (!ownerSnapshot.child(`followRequests/${requesterUid}`).exists())
     throw new Error("Follow request no longer exists.");
 
@@ -190,6 +198,7 @@ export async function respondToFollowRequest({
       [outgoingPath]: null,
       [followerPath]: requesterEntry,
       [followingPath]: ownerEntry,
+      ...canonicalUpdate,
     });
     await createNotification({
       db,
@@ -214,10 +223,12 @@ export async function respondToFollowRequest({
     await db.ref().update({
       [`users/${requesterUid}/followingCount`]: followingCount,
       [`users/${ownerUid}/followersCount`]: followersCount,
+      [`users/${requesterUid}/social/followingCount`]: followingCount,
+      [`users/${ownerUid}/social/followersCount`]: followersCount,
     });
     return { ok: true, accepted: true, followingCount, followersCount };
   }
 
-  await db.ref().update({ [requestPath]: null, [outgoingPath]: null });
+  await db.ref().update({ [requestPath]: null, [outgoingPath]: null, ...canonicalUpdate });
   return { ok: true, accepted: false };
 }
