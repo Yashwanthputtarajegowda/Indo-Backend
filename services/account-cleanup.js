@@ -1,14 +1,46 @@
+import { destroyCloudinaryVideo } from './cloudinary-signature.js';
+
 const SIX_MONTHS_MS = 183 * 24 * 60 * 60 * 1000;
+
+async function cleanupExpiredStories({ db, now = Date.now() }) {
+  if (!db) return { checked: 0, deleted: 0 };
+  const snapshot = await db.ref('stories').get();
+  if (!snapshot.exists()) return { checked: 0, deleted: 0 };
+
+  const stories = snapshot.val() || {};
+  let checked = 0;
+  let deleted = 0;
+
+  for (const [storyId, story] of Object.entries(stories)) {
+    checked += 1;
+    const expiresAt = Number(story?.expiresAt || 0);
+    if (!expiresAt || expiresAt > now) continue;
+
+    if (story?.publicId) {
+      try {
+        await destroyCloudinaryVideo(story.publicId);
+      } catch (error) {
+        console.warn('Expired Cloudinary story delete failed:', error?.message || error);
+      }
+    }
+
+    await db.ref(`stories/${storyId}`).remove();
+    deleted += 1;
+  }
+
+  return { checked, deleted };
+}
 
 export async function cleanupInactiveAccounts({ db, auth, now = Date.now() }) {
   if (!db || !auth) {
-    return { checked: 0, deleted: 0, skipped: true };
+    return { checked: 0, deleted: 0, storiesChecked: 0, storiesDeleted: 0, skipped: true };
   }
 
-  const snapshot = await db.ref("users").get();
+  const storyCleanup = await cleanupExpiredStories({ db, now });
+  const snapshot = await db.ref('users').get();
 
   if (!snapshot.exists()) {
-    return { checked: 0, deleted: 0, skipped: false };
+    return { checked: 0, deleted: 0, ...storyCleanup, skipped: false };
   }
 
   const users = snapshot.val() || {};
@@ -35,13 +67,12 @@ export async function cleanupInactiveAccounts({ db, auth, now = Date.now() }) {
       }
     }
 
-    // Remove account-owned data before deleting the Firebase Auth user.
     await db.ref(`users/${uid}`).remove();
 
     try {
       await auth.deleteUser(uid);
     } catch (error) {
-      if (error?.code !== "auth/user-not-found") {
+      if (error?.code !== 'auth/user-not-found') {
         throw error;
       }
     }
@@ -49,7 +80,7 @@ export async function cleanupInactiveAccounts({ db, auth, now = Date.now() }) {
     deleted += 1;
   }
 
-  return { checked, deleted, skipped: false };
+  return { checked, deleted, ...storyCleanup, skipped: false };
 }
 
-export { SIX_MONTHS_MS };
+export { SIX_MONTHS_MS, cleanupExpiredStories };
