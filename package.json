@@ -1,10 +1,10 @@
 {
   "name": "indo-backend",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node scripts/canonical-migration-runner.mjs",
+    "start": "node scripts/force-canonical-bootstrap.mjs",
     "preflight:production": "node scripts/production-preflight.mjs"
   },
   "dependencies": {
