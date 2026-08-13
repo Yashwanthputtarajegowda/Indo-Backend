@@ -104,8 +104,15 @@ export function createFollowRequestsRouter({ db, requireUser }) {
       if (!targetUid) return res.status(404).json({ ok: false, error: "Profile not found." });
       const canonical = await syncCanonicalUser({ db, uid: targetUid, includeContent: true });
       const publicProfile = {
-        ...canonical.profile,
+        uid: targetUid,
+        username: canonical.profile.username || "",
+        userId: canonical.profile.userId || canonical.profile.username || "",
+        name: canonical.profile.name || canonical.profile.displayName || "Indo User",
+        displayName: canonical.profile.displayName || canonical.profile.name || "Indo User",
+        bio: canonical.profile.bio || "",
+        photoURL: canonical.profile.photoURL || canonical.profile.avatarUrl || "",
         accountType: canonical.settings.accountType,
+        isVerified: Boolean(canonical.profile.isVerified || canonical.verification.isVerified),
       };
       return res.json({
         ok: true,
