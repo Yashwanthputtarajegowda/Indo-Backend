@@ -19,7 +19,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260813-followers-v3";
+const BACKEND_VERSION = "20260813-followers-v4";
 const PRODUCTION_FRONTEND_ORIGINS = ["https://yashwanthputtarajegowda.github.io"];
 const CORS_ORIGINS = Array.from(new Set([
   ...PRODUCTION_FRONTEND_ORIGINS,
@@ -87,20 +87,146 @@ app.post("/api/media/signature", async (req, res) => {
   catch { return res.status(503).json({ ok: false, error: "Video upload is temporarily unavailable." }); }
 });
 
-app.post("/api/media/videos", async (req, res) => { /* existing endpoint */ });
+app.post("/api/media/videos", async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const mediaType = req.body?.mediaType === "reel" ? "reel" : "video";
+  const publicId = String(req.body?.publicId || "").trim();
+  const secureUrl = String(req.body?.secureUrl || "").trim();
+  const title = String(req.body?.title || "").trim().slice(0, 120);
+  const caption = String(req.body?.caption || "").trim().slice(0, 500);
+  if (!publicId || !secureUrl || !/^https:\/\//i.test(secureUrl)) return res.status(400).json({ ok: false, error: "Uploaded video could not be published." });
+  try {
+    const profile = (await db.ref(`users/${user.uid}`).get()).val() || {};
+    const videoRef = db.ref("videos").push();
+    const video = { id: videoRef.key, mediaType, ownerUid: user.uid, creator: profile.username || `@${user.uid.slice(0, 8)}`, creatorName: profile.name || "Indo User", title: title || (mediaType === "reel" ? "Untitled reel" : "Untitled video"), caption, publicId, secureUrl, videoUrl: secureUrl, duration: Number(req.body?.duration || 0), width: Number(req.body?.width || 0), height: Number(req.body?.height || 0), views: 0, likes: 0, createdAt: admin.database.ServerValue.TIMESTAMP };
+    await videoRef.set(video);
+    return res.status(201).json({ ok: true, video });
+  } catch { return res.status(500).json({ ok: false, error: "Could not publish the video." }); }
+});
 
-app.get("/api/media/videos", async (req, res) => { /* existing endpoint */ });
+app.get("/api/media/videos", async (req, res) => {
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+  const type = String(req.query.type || "").trim().toLowerCase();
+  try {
+    const snapshot = await db.ref("videos").get();
+    let videos = Object.values(snapshot.val() || {})
+      .filter((item) => item && (item.secureUrl || item.videoUrl || item.url))
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    if (type === "video" || type === "reel") videos = videos.filter((item) => (item.mediaType || "video") === type);
+    return res.json({ ok: true, videos: videos.slice(0, limit) });
+  } catch { return res.status(500).json({ ok: false, error: "Could not load videos." }); }
+});
 
-app.post("/api/media/videos/:videoId/view", async (req, res) => { /* existing endpoint */ });
+app.post("/api/media/videos/:videoId/view", async (req, res) => {
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const videoId = String(req.params.videoId || "").trim();
+  if (!videoId) return res.status(400).json({ ok: false, error: "Video ID is required." });
+  try {
+    const videoRef = db.ref(`videos/${videoId}`); const snapshot = await videoRef.get();
+    if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Video not found." });
+    const result = await videoRef.child("views").transaction((current) => (Number(current) || 0) + 1);
+    return res.json({ ok: true, videoId, views: Number(result.snapshot.val()) || 0 });
+  } catch { return res.status(500).json({ ok: false, error: "Could not record video view." }); }
+});
 
-app.post("/api/media/videos/:videoId/delete", async (req, res) => { /* existing endpoint */ });
+app.post("/api/media/videos/:videoId/delete", async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const videoId = String(req.params.videoId || "").trim();
+  if (!videoId) return res.status(400).json({ ok: false, error: "Video ID is required." });
+  try {
+    const videoRef = db.ref(`videos/${videoId}`);
+    const snapshot = await videoRef.get();
+    if (!snapshot.exists()) return res.json({ ok: true, videoId, alreadyDeleted: true, cloudinaryDeleted: false });
+    const video = snapshot.val() || {};
+    if (String(video.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own video." });
+    await videoRef.remove();
+    let cloudinaryDeleted = false;
+    let cloudinaryError = "";
+    if (video.publicId) {
+      try { const result = await destroyCloudinaryVideo(video.publicId); cloudinaryDeleted = result?.result !== "error"; }
+      catch (error) { cloudinaryError = String(error?.message || error || "Cloudinary delete failed."); console.warn("Cloudinary video delete failed:", cloudinaryError); }
+    }
+    return res.json({ ok: true, videoId, deleted: true, cloudinaryDeleted, cloudinaryError: cloudinaryError || undefined });
+  } catch (error) {
+    console.error("Video delete failed:", error);
+    return res.status(500).json({ ok: false, error: "Could not delete video.", detail: String(error?.message || error || "Unknown error.") });
+  }
+});
 
-app.post("/api/stories", async (req, res) => { /* existing endpoint */ });
-app.get("/api/stories", async (req, res) => { /* existing endpoint */ });
-app.post("/api/stories/:storyId/delete", async (req, res) => { /* existing endpoint */ });
-app.get("/api/account/profile/:username", async (req, res) => { /* existing endpoint */ });
-app.get("/api/account/me", async (req, res) => { /* existing endpoint */ });
-app.patch("/api/account/profile", async (req, res) => { /* existing endpoint */ });
+app.post("/api/stories", async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const publicId = String(req.body?.publicId || "").trim(); const secureUrl = String(req.body?.secureUrl || "").trim();
+  if (!publicId || !secureUrl) return res.status(400).json({ ok: false, error: "Uploaded story data is required." });
+  try {
+    const profile = (await db.ref(`users/${user.uid}`).get()).val() || {}; const ref = db.ref("stories").push();
+    const story = { id: ref.key, ownerUid: user.uid, username: profile.username || `@${user.uid.slice(0, 8)}`, name: profile.name || "Indo User", publicId, secureUrl, createdAt: Date.now(), expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
+    await ref.set(story); return res.status(201).json({ ok: true, story });
+  } catch { return res.status(500).json({ ok: false, error: "Could not save story." }); }
+});
+
+app.get("/api/stories", async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  try {
+    const snapshot = await db.ref("stories").orderByChild("expiresAt").startAt(Date.now()).get();
+    const stories = Object.values(snapshot.val() || {}).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    return res.json({ ok: true, stories });
+  } catch { return res.status(500).json({ ok: false, error: "Could not load stories." }); }
+});
+
+app.post("/api/stories/:storyId/delete", async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const storyId = String(req.params.storyId || "").trim();
+  if (!storyId) return res.status(400).json({ ok: false, error: "Story ID is required." });
+  try {
+    const storyRef = db.ref(`stories/${storyId}`);
+    const snapshot = await storyRef.get();
+    if (!snapshot.exists()) return res.json({ ok: true, storyId, alreadyDeleted: true, cloudinaryDeleted: false });
+    const story = snapshot.val() || {};
+    if (String(story.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own story." });
+    await storyRef.remove();
+    let cloudinaryDeleted = false;
+    let cloudinaryError = "";
+    if (story.publicId) {
+      try { const result = await destroyCloudinaryVideo(story.publicId); cloudinaryDeleted = result?.result !== "error"; }
+      catch (error) { cloudinaryError = String(error?.message || error || "Cloudinary delete failed."); console.warn("Cloudinary story delete failed:", cloudinaryError); }
+    }
+    return res.json({ ok: true, storyId, deleted: true, cloudinaryDeleted, cloudinaryError: cloudinaryError || undefined });
+  } catch (error) { return res.status(500).json({ ok: false, error: "Could not delete story.", detail: String(error?.message || error || "Unknown error.") }); }
+});
+
+app.get("/api/account/profile/:username", async (req, res) => {
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const username = normalizeUserId(req.params.username);
+  if (!validUserId(username)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
+  try {
+    const claim = await db.ref(`usernames/${userIdKey(username)}`).get();
+    if (!claim.exists() || !claim.val()?.uid) return res.status(404).json({ ok: false, error: "Profile not found." });
+    const profileSnapshot = await db.ref(`users/${claim.val().uid}`).get();
+    if (!profileSnapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
+    return res.json({ ok: true, profile: profileSnapshot.val() });
+  } catch { return res.status(500).json({ ok: false, error: "Could not load profile." });
+  }
+});
+
+app.get("/api/account/me", async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return; if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  try { const snapshot = await db.ref(`users/${user.uid}`).get(); if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." }); return res.json({ ok: true, profile: snapshot.val() }); }
+  catch { return res.status(500).json({ ok: false, error: "Could not load profile." }); }
+});
+
+app.patch("/api/account/profile", async (req, res) => {
+  const user = await requireUser(req, res); if (!user) return; if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const name = String(req.body?.name || "").trim(); const bio = String(req.body?.bio || "").trim().slice(0, 160);
+  if (!name) return res.status(400).json({ ok: false, error: "User Name is required." });
+  try { const userRef = db.ref(`users/${user.uid}`); const previous = (await userRef.get()).val() || {}; await userRef.update({ name, bio }); return res.json({ ok: true, profile: { ...previous, name, bio } }); }
+  catch { return res.status(500).json({ ok: false, error: "Could not update profile." }); }
+});
 
 app.use((error, _req, res, _next) => { console.error(error); if (res.headersSent) return; return res.status(500).json({ ok: false, error: error?.message || "Internal server error." }); });
 
