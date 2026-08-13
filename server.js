@@ -12,7 +12,6 @@ import { saveCanonicalVideo, updateCanonicalVideoViews, deleteCanonicalVideo, sa
 import { createAccountContactRouter } from "./routes/account-contact.js";
 import { createAccountVisibilityRouter } from "./routes/account-visibility.js";
 import { createAccountClaimRouter } from "./routes/account-claim.js";
-import { createMediaEngagementRouter } from "./routes/media-engagement.js";
 import { createCanonicalMediaEngagementRouter } from "./routes/media-engagement-canonical.js";
 import { createSocialBlockRouter } from "./routes/social-block.js";
 import { createEarningsRouter } from "./routes/earnings.js";
@@ -23,7 +22,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260813-canonical-v3";
+const BACKEND_VERSION = "20260814-canonical-v4";
+const CANONICAL_SCHEMA_VERSION = 3;
 const PRODUCTION_FRONTEND_ORIGINS = ["https://yashwanthputtarajegowda.github.io"];
 const CORS_ORIGINS = Array.from(new Set([
   ...PRODUCTION_FRONTEND_ORIGINS,
@@ -60,7 +60,7 @@ app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: "2mb" }));
 app.use((req, res, next) => { res.setHeader("X-Indo-Backend-Version", BACKEND_VERSION); next(); });
 
-app.get("/api/health", (_req, res) => res.json({ ok: true, app: "Indo-Backend", backendVersion: BACKEND_VERSION, firebaseAdmin: Boolean(firebaseAdmin), databaseConfigured: Boolean(db) }));
+app.get("/api/health", (_req, res) => res.json({ ok: true, app: "Indo-Backend", backendVersion: BACKEND_VERSION, canonicalSchemaVersion: CANONICAL_SCHEMA_VERSION, firebaseAdmin: Boolean(firebaseAdmin), databaseConfigured: Boolean(db) }));
 
 function normalizeUserId(value) { return String(value || "").trim().toLowerCase().replace(/^@/, ""); }
 function userIdKey(userId) { return userId.replace(/\./g, "%2E").replace(/#/g, "%23").replace(/\$/g, "%24").replace(/\//g, "%2F").replace(/\[/g, "%5B").replace(/\]/g, "%5D"); }
@@ -79,7 +79,6 @@ app.use("/api", createAccountVisibilityRouter({ db, requireUser }));
 app.use("/api", createAccountClaimRouter({ db, requireUser }));
 app.use("/api", createEarningsRouter({ db, requireUser }));
 app.use("/api", createCanonicalMediaEngagementRouter({ db, requireUser }));
-app.use("/api", createMediaEngagementRouter({ db, requireUser }));
 app.use("/api", createSocialBlockRouter({ db, requireUser }));
 app.use("/api", createMessagesRouter({ db, requireUser }));
 app.use("/api", createFollowRequestsRouter({ db, requireUser }));
@@ -257,7 +256,7 @@ async function start() {
   if (firebaseAdmin && db) {
     try {
       const schemaSnapshot = await db.ref("system/canonicalSchemaVersion/version").get();
-      if (Number(schemaSnapshot.val() || 0) < 2) await migrateAllUsersToCanonical({ db });
+      if (Number(schemaSnapshot.val() || 0) < CANONICAL_SCHEMA_VERSION) await migrateAllUsersToCanonical({ db });
     } catch (error) { console.warn("Canonical user migration failed:", error?.message || error); }
     try { await cleanupInactiveAccounts({ db, auth }); } catch (error) { console.warn("Account cleanup failed:", error?.message || error); }
   }
