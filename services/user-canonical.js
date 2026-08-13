@@ -66,7 +66,7 @@ export async function syncCanonicalUser({ db, uid, includeContent = true }) {
         savesCount: Object.keys(saves[id] || {}).length,
       };
     }
-    for (const [id, item] of Object.entries(stories)) {
+    for (const [id, item] of Object.entries(storiesSnapshot.val() || {})) {
       if (!item || String(item.ownerUid || '') !== cleanUid) continue;
       contentStories[id] = { ...item, id: String(item.id || id) };
     }
@@ -75,6 +75,11 @@ export async function syncCanonicalUser({ db, uid, includeContent = true }) {
   const profile = compact(Object.fromEntries(PROFILE_FIELDS.map((field) => [field, legacyUserValue(user, field)])));
   profile.uid = cleanUid;
   profile.username = profile.username || user.username || user.userId || '';
+  const privateDetails = compact({
+    email: user.profilePrivate?.email ?? user.email,
+    phoneNumber: user.profilePrivate?.phoneNumber ?? user.phoneNumber,
+    mobile: user.profilePrivate?.mobile ?? user.mobile,
+  });
 
   const followersCount = Object.keys(followers).length;
   const followingCount = Object.keys(following).length;
@@ -93,6 +98,7 @@ export async function syncCanonicalUser({ db, uid, includeContent = true }) {
 
   const canonical = {
     profile,
+    profilePrivate: privateDetails,
     verification,
     settings: {
       ...(user.settings || {}),
@@ -192,6 +198,11 @@ export async function migrateAllUsersToCanonical({ db }) {
     const profile = compact(Object.fromEntries(PROFILE_FIELDS.map((field) => [field, legacyUserValue(user, field)])));
     profile.uid = uid;
     profile.username = profile.username || user.username || user.userId || '';
+    const profilePrivate = compact({
+      email: user.profilePrivate?.email ?? user.email,
+      phoneNumber: user.profilePrivate?.phoneNumber ?? user.phoneNumber,
+      mobile: user.profilePrivate?.mobile ?? user.mobile,
+    });
     const userVideos = byOwnerVideos[uid] || {};
     const userStories = byOwnerStories[uid] || {};
     const userEngagement = byOwnerEngagement[uid] || {};
@@ -203,6 +214,7 @@ export async function migrateAllUsersToCanonical({ db }) {
       savesCount += Number(engagement.savesCount || 0);
     }
     updates[`${root}/profile`] = profile;
+    updates[`${root}/profilePrivate`] = profilePrivate;
     updates[`${root}/verification`] = user.verification || {};
     updates[`${root}/settings`] = { ...(user.settings || {}), accountType: user.settings?.accountType || user.accountType || 'public' };
     updates[`${root}/social`] = {
