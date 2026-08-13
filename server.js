@@ -19,6 +19,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const BACKEND_VERSION = "20260813-delete-v2";
 const PRODUCTION_FRONTEND_ORIGINS = ["https://yashwanthputtarajegowda.github.io"];
 const CORS_ORIGINS = Array.from(new Set([
   ...PRODUCTION_FRONTEND_ORIGINS,
@@ -53,8 +54,9 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: "2mb" }));
+app.use((req, res, next) => { res.setHeader("X-Indo-Backend-Version", BACKEND_VERSION); next(); });
 
-app.get("/api/health", (_req, res) => res.json({ ok: true, app: "Indo-Backend", firebaseAdmin: Boolean(firebaseAdmin), databaseConfigured: Boolean(db) }));
+app.get("/api/health", (_req, res) => res.json({ ok: true, app: "Indo-Backend", backendVersion: BACKEND_VERSION, firebaseAdmin: Boolean(firebaseAdmin), databaseConfigured: Boolean(db) }));
 
 function normalizeUserId(value) { return String(value || "").trim().toLowerCase().replace(/^@/, ""); }
 function userIdKey(userId) { return userId.replace(/\./g, "%2E").replace(/#/g, "%23").replace(/\$/g, "%24").replace(/\//g, "%2F").replace(/\[/g, "%5B").replace(/\]/g, "%5D"); }
@@ -137,16 +139,31 @@ app.post("/api/media/videos/:videoId/delete", async (req, res) => {
   try {
     const videoRef = db.ref(`videos/${videoId}`);
     const snapshot = await videoRef.get();
-    if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Video not found." });
+    if (!snapshot.exists()) return res.json({ ok: true, videoId, alreadyDeleted: true, cloudinaryDeleted: false });
     const video = snapshot.val() || {};
     if (String(video.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own video." });
-    if (video.publicId) {
-      try { await destroyCloudinaryVideo(video.publicId); }
-      catch (cloudinaryError) { console.warn("Cloudinary video delete failed:", cloudinaryError?.message || cloudinaryError); }
-    }
+
+    // Remove the database record first so a Cloudinary/API issue can never leave
+    // a stale feed item behind. Treat Cloudinary deletion as best-effort cleanup.
     await videoRef.remove();
-    return res.json({ ok: true, videoId });
-  } catch { return res.status(500).json({ ok: false, error: "Could not delete video." }); }
+
+    let cloudinaryDeleted = false;
+    let cloudinaryError = "";
+    if (video.publicId) {
+      try {
+        const result = await destroyCloudinaryVideo(video.publicId);
+        cloudinaryDeleted = result?.result !== "error";
+      } catch (error) {
+        cloudinaryError = String(error?.message || error || "Cloudinary delete failed.");
+        console.warn("Cloudinary video delete failed:", cloudinaryError);
+      }
+    }
+
+    return res.json({ ok: true, videoId, deleted: true, cloudinaryDeleted, cloudinaryError: cloudinaryError || undefined });
+  } catch (error) {
+    console.error("Video delete failed:", error);
+    return res.status(500).json({ ok: false, error: "Could not delete video.", detail: String(error?.message || error || "Unknown error.") });
+  }
 });
 
 app.post("/api/stories", async (req, res) => {
@@ -179,15 +196,18 @@ app.post("/api/stories/:storyId/delete", async (req, res) => {
   try {
     const storyRef = db.ref(`stories/${storyId}`);
     const snapshot = await storyRef.get();
-    if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Story not found." });
+    if (!snapshot.exists()) return res.json({ ok: true, storyId, alreadyDeleted: true, cloudinaryDeleted: false });
     const story = snapshot.val() || {};
     if (String(story.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own story." });
-    if (story.publicId) {
-      try { await destroyCloudinaryVideo(story.publicId); } catch (cloudinaryError) { console.warn("Cloudinary story delete failed:", cloudinaryError?.message || cloudinaryError); }
-    }
     await storyRef.remove();
-    return res.json({ ok: true, storyId });
-  } catch { return res.status(500).json({ ok: false, error: "Could not delete story." }); }
+    let cloudinaryDeleted = false;
+    let cloudinaryError = "";
+    if (story.publicId) {
+      try { const result = await destroyCloudinaryVideo(story.publicId); cloudinaryDeleted = result?.result !== "error"; }
+      catch (error) { cloudinaryError = String(error?.message || error || "Cloudinary delete failed."); console.warn("Cloudinary story delete failed:", cloudinaryError); }
+    }
+    return res.json({ ok: true, storyId, deleted: true, cloudinaryDeleted, cloudinaryError: cloudinaryError || undefined });
+  } catch (error) { return res.status(500).json({ ok: false, error: "Could not delete story.", detail: String(error?.message || error || "Unknown error.") }); }
 });
 
 app.get("/api/account/profile/:username", async (req, res) => {
@@ -200,9 +220,7 @@ app.get("/api/account/profile/:username", async (req, res) => {
     const profileSnapshot = await db.ref(`users/${claim.val().uid}`).get();
     if (!profileSnapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
     return res.json({ ok: true, profile: profileSnapshot.val() });
-  } catch {
-    return res.status(500).json({ ok: false, error: "Could not load profile." });
-  }
+  } catch { return res.status(500).json({ ok: false, error: "Could not load profile." }); }
 });
 
 app.get("/api/account/me", async (req, res) => {
@@ -215,56 +233,16 @@ app.patch("/api/account/profile", async (req, res) => {
   const user = await requireUser(req, res); if (!user) return; if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
   const name = String(req.body?.name || "").trim(); const bio = String(req.body?.bio || "").trim().slice(0, 160);
   if (!name) return res.status(400).json({ ok: false, error: "User Name is required." });
-  try { const userRef = db.ref(`users/${user.uid}`); const snapshot = await userRef.get(); if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." }); await userRef.update({ name, bio, lastActiveAt: admin.database.ServerValue.TIMESTAMP }); const updated = await userRef.get(); return res.json({ ok: true, profile: updated.val() }); }
+  try { const userRef = db.ref(`users/${user.uid}`); const previous = (await userRef.get()).val() || {}; await userRef.update({ name, bio }); return res.json({ ok: true, profile: { ...previous, name, bio } }); }
   catch { return res.status(500).json({ ok: false, error: "Could not update profile." }); }
 });
 
-app.post("/api/account/check-user-id", async (req, res) => {
-  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
-  const userId = normalizeUserId(req.body?.userId); if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "User ID can contain only letters, numbers, dots, underscores, and hyphens." });
-  try { const snapshot = await db.ref(`usernames/${userIdKey(userId)}`).get(); if (!snapshot.exists()) return res.json({ ok: true, userId, available: true, exists: false }); const claim = snapshot.val() || {}; let profile = null; if (claim.uid) { const userSnapshot = await db.ref(`users/${claim.uid}`).get(); if (userSnapshot.exists()) { const value = userSnapshot.val() || {}; profile = { uid: claim.uid, userId: value.username || `@${userId}`, name: value.name || "Indo User" }; } } return res.json({ ok: true, userId, available: false, exists: Boolean(profile), user: profile }); }
-  catch { return res.status(500).json({ ok: false, error: "Could not check User ID." }); }
-});
+app.use((error, _req, res, _next) => { console.error(error); if (res.headersSent) return; return res.status(500).json({ ok: false, error: error?.message || "Internal server error." }); });
 
-app.post("/api/account/claim-user-id", async (req, res) => {
-  const user = await requireUser(req, res); if (!user) return; if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
-  const userId = normalizeUserId(req.body?.userId); const name = String(req.body?.name || "").trim(); const accountType = req.body?.accountType === "private" ? "private" : "public";
-  if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." }); if (!name) return res.status(400).json({ ok: false, error: "User name is required." });
-  try {
-    const userRef = db.ref(`users/${user.uid}`); const existingProfile = await userRef.get(); if (existingProfile.exists() && existingProfile.val()?.usernameKey) return res.status(409).json({ ok: false, error: "This account already has a User ID. One user can have only one User ID." });
-    const usernameRef = db.ref(`usernames/${userIdKey(userId)}`); const claim = await usernameRef.transaction((current) => { if (current === null) return { uid: user.uid, username: `@${userId}` }; if (current?.uid === user.uid) return current; return undefined; });
-    if (!claim.committed) return res.status(409).json({ ok: false, error: `@${userId} is already taken. Choose another User ID.` });
-    const counterRef = db.ref("system/indoCounter"); const counter = await counterRef.transaction((current) => (Number(current) || 1165) + 1); if (!counter.committed) { await usernameRef.remove(); return res.status(500).json({ ok: false, error: "Could not generate Indo ID." }); }
-    const indoId = `INDO-${String(counter.snapshot.val()).padStart(6, "0")}`;
-    await userRef.set({ uid: user.uid, indoId, name, username: `@${userId}`, usernameKey: userId, email: user.email || "", accountType, createdAt: existingProfile.exists() ? existingProfile.val()?.createdAt || admin.database.ServerValue.TIMESTAMP : admin.database.ServerValue.TIMESTAMP, lastActiveAt: admin.database.ServerValue.TIMESTAMP });
-    return res.json({ ok: true, indoId, username: `@${userId}`, accountType });
-  } catch { return res.status(500).json({ ok: false, error: "Could not create account profile." }); }
-});
+async function start() {
+  if (firebaseAdmin && db) { try { await cleanupInactiveAccounts({ db, auth }); } catch (error) { console.warn("Account cleanup failed:", error?.message || error); } }
+  app.listen(PORT, () => console.log(`Indo backend listening on port ${PORT}`));
+  setInterval(() => { cleanupInactiveAccounts({ db, auth }).catch((error) => console.warn("Scheduled account cleanup failed:", error?.message || error)); }, CLEANUP_INTERVAL_MS).unref?.();
+}
 
-app.post("/api/account/delete", async (req, res) => { const user = await requireUser(req, res); if (!user) return; try { const result = await deleteAccountData({ db, auth, uid: user.uid }); return res.json({ ok: true, ...result }); } catch { return res.status(500).json({ ok: false, error: "Could not delete account." }); } });
-
-app.post("/api/social/follow", async (req, res) => {
-  const user = await requireUser(req, res); if (!user) return; const targetUid = String(req.body?.targetUid || "").trim(); const follow = req.body?.follow === true; if (!targetUid) return res.status(400).json({ ok: false, error: "Target user is required." });
-  try { const targetSnapshot = await db.ref(`users/${targetUid}`).get(); if (!targetSnapshot.exists()) return res.status(404).json({ ok: false, error: "Target profile not found." }); const result = await toggleFollow({ db, followerUid: user.uid, targetUid, follow }); return res.json({ ok: true, ...result }); }
-  catch { return res.status(400).json({ ok: false, error: "Could not update follow status." }); }
-});
-
-app.get("/api/social/follow-status/:targetUid", async (req, res) => {
-  const user = await requireUser(req, res); if (!user) return; const targetUid = String(req.params.targetUid || "").trim();
-  try { const result = await getFollowStatus({ db, followerUid: user.uid, targetUid }); return res.json({ ok: true, ...result }); }
-  catch { return res.status(500).json({ ok: false, error: "Could not load follow status." }); }
-});
-
-app.post("/api/account/activity", async (req, res) => {
-  const user = await requireUser(req, res); if (!user) return; if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
-  try { await db.ref(`users/${user.uid}/lastActiveAt`).set(admin.database.ServerValue.TIMESTAMP); return res.json({ ok: true, lastActiveAt: Date.now() }); }
-  catch { return res.status(500).json({ ok: false, error: "Could not update activity." }); }
-});
-
-app.use((error, _req, res, _next) => res.status(500).json({ ok: false, error: error.message || "Internal server error." }));
-app.listen(PORT, () => console.log(`Indo backend running on port ${PORT}`));
-setInterval(() => { cleanupInactiveAccounts({ db, auth }).catch(() => {}); }, CLEANUP_INTERVAL_MS).unref();
-
-// Railway deploy trigger: keep video-feed fix live.
-
-// Railway deploy trigger: keep video-feed fix live.
+start();
