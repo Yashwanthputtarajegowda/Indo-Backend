@@ -1,7 +1,8 @@
 import express from "express";
 
 function normalizeUserId(value) {
-  return String(value || "").trim().toLowerCase().replace(/^@/, "");
+  const raw = String(value || "").trim().toLowerCase().replace(/^@+/, "");
+  return raw;
 }
 
 function validUserId(value) {
@@ -35,17 +36,25 @@ export function createAccountClaimRouter({ db, requireUser }) {
     if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
     if (!name) return res.status(400).json({ ok: false, error: "User Name is required." });
 
+    const key = userIdKey(userId);
+    const username = `@${userId}`;
+
     try {
-      const usersSnapshot = await db.ref("users").get();
-      const users = usersSnapshot.val() || {};
-      for (const [otherUid, other] of Object.entries(users)) {
-        if (String(otherUid) === uid) continue;
-        const existing = normalizeUserId(
-          other?.profile?.userId || other?.profile?.username || other?.userId || other?.username || "",
-        );
-        if (existing === userId) {
-          return res.status(409).json({ ok: false, error: `@${userId} is already taken.` });
-        }
+      // The usernames index is the authoritative uniqueness lock. A transaction
+      // prevents two accounts from claiming the same ID at the same time.
+      const claimRef = db.ref(`usernames/${key}`);
+      const claimResult = await claimRef.transaction((current) => {
+        if (current && String(current.uid || "") !== uid) return;
+        return { uid, username, updatedAt: Date.now() };
+      });
+
+      if (!claimResult.committed) {
+        return res.status(409).json({ ok: false, error: `${username} is already taken.` });
+      }
+
+      const claim = claimResult.snapshot.val() || {};
+      if (String(claim.uid || "") !== uid) {
+        return res.status(409).json({ ok: false, error: `${username} is already taken.` });
       }
 
       const now = Date.now();
@@ -55,7 +64,7 @@ export function createAccountClaimRouter({ db, requireUser }) {
         ...previousProfile,
         uid,
         userId,
-        username: `@${userId}`,
+        username,
         name,
         displayName: name,
         bio: String(previousProfile.bio || current.bio || "").slice(0, 160),
@@ -72,18 +81,19 @@ export function createAccountClaimRouter({ db, requireUser }) {
       const updates = {
         [`users/${uid}/profile`]: profile,
         [`users/${uid}/profilePrivate`]: profilePrivate,
-        [`users/${uid}/userId`]: `@${userId}`,
-        [`users/${uid}/username`]: `@${userId}`,
+        [`users/${uid}/userId`]: username,
+        [`users/${uid}/username`]: username,
         [`users/${uid}/name`]: name,
         [`users/${uid}/accountType`]: accountType,
         [`users/${uid}/updatedAt`]: now,
-        [`usernames/${userIdKey(userId)}`]: { uid, username: `@${userId}`, updatedAt: now },
+        [`usernames/${key}`]: { uid, username, updatedAt: now },
       };
 
       await db.ref().update(updates);
 
       const verify = (await db.ref(`users/${uid}/profile`).get()).val() || {};
       if (normalizeUserId(verify.userId || verify.username) !== userId) {
+        await claimRef.transaction((current) => String(current?.uid || "") === uid ? null : current);
         return res.status(500).json({ ok: false, error: "Could not verify the Indo profile write." });
       }
 
@@ -103,11 +113,8 @@ export function createAccountClaimRouter({ db, requireUser }) {
     const userId = normalizeUserId(req.body?.userId);
     if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
     try {
-      const users = (await db.ref("users").get()).val() || {};
-      const taken = Object.values(users).some((user) => normalizeUserId(
-        user?.profile?.userId || user?.profile?.username || user?.userId || user?.username || "",
-      ) === userId);
-      return res.json({ ok: true, available: !taken, userId });
+      const claim = await db.ref(`usernames/${userIdKey(userId)}`).get();
+      return res.json({ ok: true, available: !claim.exists(), userId });
     } catch (error) {
       console.error("User ID availability check failed:", error);
       return res.status(500).json({ ok: false, error: "Could not check User ID. Please try again." });
