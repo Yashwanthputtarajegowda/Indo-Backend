@@ -7,8 +7,47 @@ function safeText(value, max = 500) {
   return String(value || "").trim().slice(0, max);
 }
 
+function normalizePrivacy(value) {
+  const normalized = String(value || "public").trim().toLowerCase();
+  return ["public", "followers", "private"].includes(normalized) ? normalized : "public";
+}
+
+function normalizeTags(value) {
+  if (Array.isArray(value)) return value.map((tag) => String(tag || "").trim().replace(/^#/, "")).filter(Boolean).slice(0, 20);
+  return String(value || "").split(",").map((tag) => tag.trim().replace(/^#/, "")).filter(Boolean).slice(0, 20);
+}
+
 export function createCanonicalMediaEngagementRouter({ db, requireUser }) {
   const router = express.Router();
+
+  router.post("/media/videos", (req, res, next) => {
+    const originalJson = res.json.bind(res);
+    res.json = async (payload) => {
+      try {
+        const videoId = String(payload?.video?.id || "").trim();
+        if (db && payload?.ok && videoId) {
+          const body = req.body || {};
+          const metadata = {
+            description: safeText(body.description ?? body.caption, 500),
+            caption: safeText(body.description ?? body.caption, 500),
+            privacy: normalizePrivacy(body.privacy),
+            allowComments: body.allowComments !== false,
+            allowDuet: body.allowDuet !== false,
+            category: safeText(body.category, 60),
+            tags: normalizeTags(body.tags),
+            location: safeText(body.location, 120),
+            updatedAt: Date.now(),
+          };
+          await db.ref(`videos/${videoId}`).update(metadata);
+          if (payload.video && typeof payload.video === "object") payload.video = { ...payload.video, ...metadata };
+        }
+      } catch (error) {
+        console.warn("Video metadata persistence failed:", error?.message || error);
+      }
+      return originalJson(payload);
+    };
+    next();
+  });
 
   async function loadMedia(req, res, mediaId) {
     const snapshot = await db.ref(`videos/${mediaId}`).get();
@@ -80,6 +119,7 @@ export function createCanonicalMediaEngagementRouter({ db, requireUser }) {
     if (!text) return res.status(400).json({ ok: false, error: "Comment cannot be empty." });
     try {
       const media = await loadMedia(req, res, mediaId); if (!media) return;
+      if (media.allowComments === false) return res.status(403).json({ ok: false, error: "Comments are disabled for this video." });
       const profile = (await db.ref(`users/${user.uid}`).get()).val() || {};
       const ref = db.ref(`videoComments/${mediaId}`).push();
       const comment = { id: ref.key, mediaId, uid: user.uid, username: profile.profile?.username || profile.username || `@${user.uid.slice(0, 8)}`, text, createdAt: Date.now() };
