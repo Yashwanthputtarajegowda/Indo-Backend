@@ -1,8 +1,7 @@
 import express from "express";
 
 function normalizeUserId(value) {
-  const raw = String(value || "").trim().toLowerCase().replace(/^@+/, "");
-  return raw;
+  return String(value || "").trim().toLowerCase().replace(/^@+/, "");
 }
 
 function validUserId(value) {
@@ -17,6 +16,18 @@ function userIdKey(value) {
     .replace(/\//g, "%2F")
     .replace(/\[/g, "%5B")
     .replace(/\]/g, "%5D");
+}
+
+async function legacyUserIdTaken(db, userId, uid) {
+  const usersSnapshot = await db.ref("users").get();
+  const users = usersSnapshot.val() || {};
+  return Object.entries(users).some(([otherUid, other]) => {
+    if (String(otherUid) === uid) return false;
+    const existing = normalizeUserId(
+      other?.profile?.userId || other?.profile?.username || other?.userId || other?.username || "",
+    );
+    return existing === userId;
+  });
 }
 
 export function createAccountClaimRouter({ db, requireUser }) {
@@ -40,8 +51,10 @@ export function createAccountClaimRouter({ db, requireUser }) {
     const username = `@${userId}`;
 
     try {
-      // The usernames index is the authoritative uniqueness lock. A transaction
-      // prevents two accounts from claiming the same ID at the same time.
+      if (await legacyUserIdTaken(db, userId, uid)) {
+        return res.status(409).json({ ok: false, error: `${username} is already taken.` });
+      }
+
       const claimRef = db.ref(`usernames/${key}`);
       const claimResult = await claimRef.transaction((current) => {
         if (current && String(current.uid || "") !== uid) return;
@@ -78,7 +91,7 @@ export function createAccountClaimRouter({ db, requireUser }) {
         email: user.email || current.profilePrivate?.email || current.email || "",
       };
 
-      const updates = {
+      await db.ref().update({
         [`users/${uid}/profile`]: profile,
         [`users/${uid}/profilePrivate`]: profilePrivate,
         [`users/${uid}/userId`]: username,
@@ -87,9 +100,7 @@ export function createAccountClaimRouter({ db, requireUser }) {
         [`users/${uid}/accountType`]: accountType,
         [`users/${uid}/updatedAt`]: now,
         [`usernames/${key}`]: { uid, username, updatedAt: now },
-      };
-
-      await db.ref().update(updates);
+      });
 
       const verify = (await db.ref(`users/${uid}/profile`).get()).val() || {};
       if (normalizeUserId(verify.userId || verify.username) !== userId) {
@@ -113,8 +124,10 @@ export function createAccountClaimRouter({ db, requireUser }) {
     const userId = normalizeUserId(req.body?.userId);
     if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
     try {
-      const claim = await db.ref(`usernames/${userIdKey(userId)}`).get();
-      return res.json({ ok: true, available: !claim.exists(), userId });
+      const indexed = await db.ref(`usernames/${userIdKey(userId)}`).get();
+      if (indexed.exists()) return res.json({ ok: true, available: false, userId });
+      const taken = await legacyUserIdTaken(db, userId, "");
+      return res.json({ ok: true, available: !taken, userId });
     } catch (error) {
       console.error("User ID availability check failed:", error);
       return res.status(500).json({ ok: false, error: "Could not check User ID. Please try again." });
