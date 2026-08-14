@@ -1,7 +1,7 @@
 import express from "express";
 import { createNotification } from "../services/notifications.js";
 import { canAccessMedia } from "./social-block.js";
-import { setCanonicalVideoEngagement, saveCanonicalComment } from "../services/canonical-content.js";
+import { setCanonicalVideoEngagement, saveCanonicalComment, updateCanonicalVideoViews } from "../services/canonical-content.js";
 
 function safeText(value, max = 500) {
   return String(value || "").trim().slice(0, max);
@@ -15,6 +15,10 @@ function normalizePrivacy(value) {
 function normalizeTags(value) {
   if (Array.isArray(value)) return value.map((tag) => String(tag || "").trim().replace(/^#/, "")).filter(Boolean).slice(0, 20);
   return String(value || "").split(",").map((tag) => tag.trim().replace(/^#/, "")).filter(Boolean).slice(0, 20);
+}
+
+function countTruthy(value) {
+  return Object.values(value || {}).filter(Boolean).length;
 }
 
 export function createCanonicalMediaEngagementRouter({ db, requireUser }) {
@@ -60,27 +64,58 @@ export function createCanonicalMediaEngagementRouter({ db, requireUser }) {
     return media;
   }
 
+  async function handleUniqueView(req, res, mediaId) {
+    const user = await requireUser(req, res); if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    try {
+      const media = await loadMedia(req, res, mediaId); if (!media) return;
+      let firstViewForUser = false;
+      const result = await db.ref(`videoViews/${mediaId}`).transaction((current) => {
+        const next = current && typeof current === "object" ? { ...current } : {};
+        const uid = String(user.uid);
+        firstViewForUser = !Boolean(next[uid]);
+        next[uid] = true;
+        return next;
+      });
+      const users = result.snapshot.val() || {};
+      const views = Math.max(Number(media.views || 0), countTruthy(users));
+      await db.ref(`videos/${mediaId}/views`).set(views);
+      if (media.ownerUid) await updateCanonicalVideoViews({ db, uid: media.ownerUid, videoId: mediaId, views });
+      return res.json({ ok: true, videoId: mediaId, views, counted: firstViewForUser });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || "Could not record video view." });
+    }
+  }
+
+  // One authenticated user gets at most one counted view for a media item.
+  // Both routes are kept so older and newer frontend surfaces share the same rule.
+  router.post("/media/:mediaId/view", (req, res) => handleUniqueView(req, res, safeText(req.params.mediaId, 120)));
+  router.post("/media/videos/:videoId/view", (req, res) => handleUniqueView(req, res, safeText(req.params.videoId, 120)));
+
   router.post("/media/:mediaId/like", async (req, res) => {
     const user = await requireUser(req, res); if (!user) return;
     if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
     const mediaId = safeText(req.params.mediaId, 120); const like = req.body?.like === true;
     try {
       const media = await loadMedia(req, res, mediaId); if (!media) return;
-      const likeRef = db.ref(`videoLikes/${mediaId}/${user.uid}`);
-      const wasLiked = Boolean((await likeRef.get()).val());
-      await likeRef.set(like || null);
-      const result = await db.ref(`videos/${mediaId}/likes`).transaction((current) => {
-        const value = Math.max(0, Number(current) || 0);
-        if (like === wasLiked) return value;
-        return like ? value + 1 : Math.max(0, value - 1);
+      let wasLiked = false;
+      const likeState = await db.ref(`videoLikes/${mediaId}`).transaction((current) => {
+        const next = current && typeof current === "object" ? { ...current } : {};
+        const uid = String(user.uid);
+        wasLiked = Boolean(next[uid]);
+        if (like) next[uid] = true;
+        else delete next[uid];
+        return next;
       });
-      const likes = Number(result.snapshot.val()) || 0;
+      const likeUsers = likeState.snapshot.val() || {};
+      const likes = countTruthy(likeUsers);
+      await db.ref(`videos/${mediaId}/likes`).set(likes);
       if (media.ownerUid) await setCanonicalVideoEngagement({ db, ownerUid: media.ownerUid, mediaId, kind: "like", actorUid: user.uid, value: like, count: likes });
       if (like && !wasLiked && media.ownerUid && media.ownerUid !== user.uid) {
         const actor = (await db.ref(`users/${user.uid}`).get()).val() || {};
         await createNotification({ db, recipientUid: media.ownerUid, type: "like", actorUid: user.uid, actorName: actor.profile?.name || actor.name || "Indo User", actorUserId: actor.profile?.username || actor.username || "", text: "liked your video", targetId: mediaId });
       }
-      return res.json({ ok: true, liked: like, likes });
+      return res.json({ ok: true, liked: like, likes, changed: wasLiked !== like });
     } catch (error) { return res.status(500).json({ ok: false, error: error.message || "Could not update like." }); }
   });
 
@@ -90,13 +125,14 @@ export function createCanonicalMediaEngagementRouter({ db, requireUser }) {
     const mediaId = safeText(req.params.mediaId, 120);
     try {
       const media = await loadMedia(req, res, mediaId); if (!media) return;
-      const [likeSnapshot, saveSnapshot, canonicalLike, canonicalSave] = await Promise.all([
+      const [likeSnapshot, saveSnapshot, viewSnapshot, canonicalLike, canonicalSave] = await Promise.all([
         db.ref(`videoLikes/${mediaId}/${user.uid}`).get(),
         db.ref(`videoSaves/${mediaId}/${user.uid}`).get(),
+        db.ref(`videoViews/${mediaId}/${user.uid}`).get(),
         media.ownerUid ? db.ref(`users/${media.ownerUid}/engagement/videos/${mediaId}/likes/${user.uid}`).get() : null,
         media.ownerUid ? db.ref(`users/${media.ownerUid}/engagement/videos/${mediaId}/saves/${user.uid}`).get() : null,
       ]);
-      return res.json({ ok: true, likes: Number(media.likes || 0), liked: Boolean(canonicalLike?.val?.() ?? likeSnapshot.val()), saved: Boolean(canonicalSave?.val?.() ?? saveSnapshot.val()) });
+      return res.json({ ok: true, likes: Number(media.likes || 0), liked: Boolean(canonicalLike?.val?.() ?? likeSnapshot.val()), saved: Boolean(canonicalSave?.val?.() ?? saveSnapshot.val()), viewed: Boolean(viewSnapshot.val()), views: Number(media.views || 0) });
     } catch (error) { return res.status(500).json({ ok: false, error: error.message || "Could not load engagement." }); }
   });
 
