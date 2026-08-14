@@ -17,12 +17,13 @@ import { createSocialBlockRouter } from "./routes/social-block.js";
 import { createEarningsRouter } from "./routes/earnings.js";
 import { createMessagesRouter } from "./routes/messages.js";
 import { createFollowRequestsRouter } from "./routes/follow-requests.js";
+import { createNotificationsRouter } from "./routes/notifications.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260814-canonical-v4";
+const BACKEND_VERSION = "20260815-notifications-v1";
 const CANONICAL_SCHEMA_VERSION = 3;
 const PRODUCTION_FRONTEND_ORIGINS = ["https://yashwanthputtarajegowda.github.io"];
 const CORS_ORIGINS = Array.from(new Set([
@@ -82,6 +83,7 @@ app.use("/api", createCanonicalMediaEngagementRouter({ db, requireUser }));
 app.use("/api", createSocialBlockRouter({ db, requireUser }));
 app.use("/api", createMessagesRouter({ db, requireUser }));
 app.use("/api", createFollowRequestsRouter({ db, requireUser }));
+app.use("/api", createNotificationsRouter({ db, requireUser }));
 
 app.post("/api/media/signature", async (req, res) => {
   const user = await requireUser(req, res); if (!user) return;
@@ -217,7 +219,7 @@ app.get("/api/account/profile/:username", async (req, res) => {
   if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
   const username = normalizeUserId(req.params.username);
   if (!validUserId(username)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
-  try {
+  try { 
     const claim = await db.ref(`usernames/${userIdKey(username)}`).get();
     if (!claim.exists() || !claim.val()?.uid) return res.status(404).json({ ok: false, error: "Profile not found." });
     const targetUid = String(claim.val().uid);
@@ -232,8 +234,7 @@ app.get("/api/account/me", async (req, res) => {
   try {
     const canonical = await syncCanonicalUser({ db, uid: user.uid, includeContent: true });
     return res.json({ ok: true, profile: canonical.profile, stats: canonical.stats, social: canonical.social, private: canonical.profilePrivate });
-  }
-  catch { return res.status(500).json({ ok: false, error: "Could not load profile." }); }
+  } catch { return res.status(500).json({ ok: false, error: "Could not load profile." }); }
 });
 
 app.patch("/api/account/profile", async (req, res) => {
@@ -246,8 +247,7 @@ app.patch("/api/account/profile", async (req, res) => {
     const nextProfile = { ...(previous.profile || {}), uid: user.uid, name, bio };
     await userRef.update({ name, bio, profile: nextProfile, updatedAt: Date.now(), 'profile/updatedAt': Date.now() });
     return res.json({ ok: true, profile: nextProfile });
-  }
-  catch { return res.status(500).json({ ok: false, error: "Could not update profile." }); }
+  } catch { return res.status(500).json({ ok: false, error: "Could not update profile." }); }
 });
 
 app.use((error, _req, res, _next) => { console.error(error); if (res.headersSent) return; return res.status(500).json({ ok: false, error: error?.message || "Internal server error." }); });
