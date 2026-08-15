@@ -1,4 +1,6 @@
 import express from "express";
+import { createCloudinarySignature, getCloudinaryConfig } from "../services/cloudinary-signature.js";
+import { syncCanonicalUser } from "../services/user-canonical.js";
 
 function normalizeUserId(value) {
   return String(value || "").trim().toLowerCase().replace(/^@+/, "");
@@ -28,6 +30,53 @@ async function legacyUserIdTaken(db, userId, uid) {
     );
     return existing === userId;
   });
+}
+
+function clean(value, max = 500) {
+  return String(value ?? "")
+    .trim()
+    .slice(0, max);
+}
+
+async function findUidByUserId(db, identifier) {
+  const cleanId = normalizeUserId(identifier);
+  if (!cleanId) return "";
+  const direct = await db.ref(`usernames/${userIdKey(cleanId)}`).get();
+  if (direct.exists() && direct.val()?.uid) return String(direct.val().uid);
+  const users = (await db.ref("users").get()).val() || {};
+  const match = Object.entries(users).find(([uid, value]) => {
+    const profile = value?.profile || {};
+    const current = normalizeUserId(profile.userId || profile.username || value?.userId || value?.username);
+    return current === cleanId || String(uid) === cleanId;
+  });
+  return match ? String(match[0]) : "";
+}
+
+function shapeProfile(profile = {}, stats = {}) {
+  return {
+    ...profile,
+    uid: String(profile.uid || ""),
+    userId: normalizeUserId(profile.userId || profile.username),
+    username: profile.username || (profile.userId ? `@${normalizeUserId(profile.userId)}` : ""),
+    name: String(profile.name || profile.displayName || ""),
+    displayName: String(profile.displayName || profile.name || ""),
+    bio: String(profile.bio || ""),
+    location: String(profile.location || ""),
+    website: String(profile.website || ""),
+    role: String(profile.role || ""),
+    interests: String(profile.interests || ""),
+    language: String(profile.language || ""),
+    visibility: profile.visibility === "private" ? "private" : "public",
+    avatarUrl: String(profile.avatarUrl || profile.photoURL || ""),
+    photoURL: String(profile.photoURL || profile.avatarUrl || ""),
+    stats: {
+      videosCount: Number(stats.videosCount || 0),
+      postsCount: Number(stats.postsCount || 0),
+      followersCount: Number(stats.followersCount || 0),
+      followingCount: Number(stats.followingCount || 0),
+      likesCount: Number(stats.likesCount || 0),
+    },
+  };
 }
 
 export function createAccountClaimRouter({ db, requireUser }) {
@@ -162,6 +211,98 @@ export function createAccountClaimRouter({ db, requireUser }) {
     } catch (error) {
       console.error("User search failed:", error);
       return res.status(500).json({ ok: false, error: "Could not search users." });
+    }
+  });
+
+  router.get("/account/me", async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+    try {
+      const canonical = await syncCanonicalUser({ db, uid: user.uid, includeContent: true });
+      return res.json({ ok: true, profile: shapeProfile(canonical.profile, canonical.stats), stats: canonical.stats, social: canonical.social });
+    } catch (error) {
+      console.error("Load own profile failed:", error);
+      return res.status(500).json({ ok: false, error: "Could not load profile." });
+    }
+  });
+
+  router.get("/account/profile/:identifier", async (req, res) => {
+    const viewer = await requireUser(req, res);
+    if (!viewer) return;
+    if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+    try {
+      const uid = await findUidByUserId(db, req.params.identifier);
+      if (!uid) return res.status(404).json({ ok: false, error: "Profile not found." });
+      const canonical = await syncCanonicalUser({ db, uid, includeContent: true });
+      return res.json({ ok: true, profile: shapeProfile(canonical.profile, canonical.stats), stats: canonical.stats, social: canonical.social });
+    } catch (error) {
+      console.error("Load profile failed:", error);
+      return res.status(500).json({ ok: false, error: "Could not load profile." });
+    }
+  });
+
+  router.patch("/account/profile", async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+
+    const uid = String(user.uid || "").trim();
+    const current = (await db.ref(`users/${uid}`).get()).val() || {};
+    const currentProfile = current.profile || {};
+    const name = clean(req.body?.name, 80);
+    if (!name) return res.status(400).json({ ok: false, error: "Name is required." });
+
+    const nextProfile = {
+      ...currentProfile,
+      uid,
+      userId: normalizeUserId(currentProfile.userId || current.userId || current.username),
+      username: currentProfile.username || current.username || (currentProfile.userId ? `@${normalizeUserId(currentProfile.userId)}` : ""),
+      name,
+      displayName: name,
+      bio: clean(req.body?.bio, 160),
+      location: clean(req.body?.location, 100),
+      website: clean(req.body?.website, 200),
+      role: clean(req.body?.role, 60),
+      interests: clean(req.body?.interests, 240),
+      language: clean(req.body?.language, 40),
+      visibility: String(req.body?.visibility || "public") === "private" ? "private" : "public",
+      avatarUrl: clean(req.body?.avatarUrl || currentProfile.avatarUrl || currentProfile.photoURL, 1200),
+      photoURL: clean(req.body?.photoURL || req.body?.avatarUrl || currentProfile.photoURL || currentProfile.avatarUrl, 1200),
+      updatedAt: Date.now(),
+    };
+
+    try {
+      await db.ref().update({
+        [`users/${uid}/profile`]: nextProfile,
+        [`users/${uid}/name`]: name,
+        [`users/${uid}/updatedAt`]: Date.now(),
+      });
+      const canonical = await syncCanonicalUser({ db, uid, includeContent: true });
+      return res.json({ ok: true, profile: shapeProfile(canonical.profile, canonical.stats), stats: canonical.stats, social: canonical.social });
+    } catch (error) {
+      console.error("Save profile failed:", error);
+      return res.status(500).json({ ok: false, error: "Could not save profile." });
+    }
+  });
+
+  router.post("/account/profile/avatar-signature", async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    try {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const folder = "indo/profiles";
+      return res.json({
+        ok: true,
+        ...getCloudinaryConfig(),
+        timestamp,
+        folder,
+        resourceType: "image",
+        signature: createCloudinarySignature(timestamp, { folder }),
+      });
+    } catch (error) {
+      console.error("Profile avatar signature failed:", error);
+      return res.status(503).json({ ok: false, error: "Profile photo upload is temporarily unavailable." });
     }
   });
 
