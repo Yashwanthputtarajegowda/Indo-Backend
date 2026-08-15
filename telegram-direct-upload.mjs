@@ -144,6 +144,7 @@ if (!express.application.__indoDirectTelegramUpload) {
         const profile = (await syncCanonicalUser({ db, uid: user.uid, includeContent: false })).profile;
         const telegram = await mirrorVideoBuffer({ buffer, fileName, caption });
         const videoRef = db.ref("videos").push();
+        const streamUrl = `${req.protocol || "https"}://${req.get("host")}/api/media/videos/${encodeURIComponent(videoRef.key)}/stream`;
         const video = {
           id: videoRef.key,
           mediaType,
@@ -152,6 +153,9 @@ if (!express.application.__indoDirectTelegramUpload) {
           creatorName: profile.name || "Indo User",
           title: title || (mediaType === "reel" ? "Untitled reel" : "Untitled video"),
           caption,
+          secureUrl: streamUrl,
+          videoUrl: streamUrl,
+          telegramPlayback: streamUrl,
           duration,
           width,
           height,
@@ -177,10 +181,7 @@ if (!express.application.__indoDirectTelegramUpload) {
         await db.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => (Number(current) || 0) + 1);
         await db.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).transaction((current) => (Number(current) || 0) + 1);
 
-        const proto = req.protocol || "https";
-        const host = req.get("host");
-        const streamUrl = `${proto}://${host}/api/media/videos/${encodeURIComponent(video.id)}/stream`;
-        return res.status(201).json({ ok: true, video: { ...video, secureUrl: streamUrl, videoUrl: streamUrl, telegramPlayback: streamUrl } });
+        return res.status(201).json({ ok: true, video });
       } catch (error) {
         console.error("Telegram direct video upload failed:", error?.message || error);
         return res.status(500).json({ ok: false, error: error?.message || "Video upload is temporarily unavailable." });
