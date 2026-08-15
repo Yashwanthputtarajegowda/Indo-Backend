@@ -36,6 +36,14 @@ const legacyViewLimiter = rateLimit({
   message: { ok: false, error: "Too many view requests. Please try again later." },
 });
 
+const mediaSignatureLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many upload-signature requests. Please try again later." },
+});
+
 function normalizeUsername(value) {
   return String(value || "")
     .trim()
@@ -193,6 +201,27 @@ express.application.post = function securePost(path, ...handlers) {
     };
     return originalPost.call(this, path, legacyViewLimiter, guard, ...handlers);
   }
+
+  if (path === "/api/media/signature") {
+    const guard = async (req, res, next) => {
+      if (!auth)
+        return res.status(503).json({ ok: false, error: "Authentication service is unavailable." });
+      const header = String(req.headers.authorization || "");
+      if (!/^Bearer\s+\S+$/i.test(header))
+        return res.status(401).json({ ok: false, error: "Authentication required." });
+      const token = header.replace(/^Bearer\s+/i, "").trim();
+      if (token.length < 20 || token.length > 16384)
+        return res.status(401).json({ ok: false, error: "Invalid authentication token." });
+      try {
+        req.securityUser = await auth.verifyIdToken(token, true);
+      } catch {
+        return res.status(401).json({ ok: false, error: "Invalid or expired authentication token." });
+      }
+      return next();
+    };
+    return originalPost.call(this, path, mediaSignatureLimiter, guard, ...handlers);
+  }
+
   return originalPost.call(this, path, ...handlers);
 };
 
