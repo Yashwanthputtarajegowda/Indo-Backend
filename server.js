@@ -41,7 +41,7 @@ const DATABASE_URL =
   process.env.FIREBASE_DATABASE_URL ||
   "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260815-security-v1";
+const BACKEND_VERSION = "20260815-security-v2";
 const CANONICAL_SCHEMA_VERSION = 3;
 const PRODUCTION_FRONTEND_ORIGINS = [
   "https://yashwanthputtarajegowda.github.io",
@@ -152,6 +152,39 @@ function userIdKey(userId) {
 function validUserId(userId) {
   return /^[a-z0-9._-]{1,50}$/.test(userId);
 }
+function mediaFolder(uid, kind) {
+  const safeUid = String(uid || "").trim();
+  return kind === "story" ? `indo/stories/${safeUid}` : `indo/videos/${safeUid}`;
+}
+function isSafeHttpUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.length > 2048 || /[\u0000-\u001f\u007f]/.test(raw)) return false;
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+function isCloudinarySecureUrl(value) {
+  if (!isSafeHttpUrl(value)) return false;
+  try {
+    const parsed = new URL(value);
+    const cloudName = String(process.env.CLOUDINARY_CLOUD_NAME || "").trim();
+    if (!cloudName) return false;
+    return parsed.hostname === `${cloudName}.res.cloudinary.com` &&
+      parsed.pathname.startsWith("/");
+  } catch {
+    return false;
+  }
+}
+function isUserMediaPublicId(publicId, uid, kind) {
+  const value = String(publicId || "").trim().replace(/^\/+/, "");
+  if (!value || value.length > 500 || value.includes("..")) return false;
+  if (/%2f|%2e|%5c/i.test(value)) return false;
+  if (!/^[A-Za-z0-9._\/-]+$/.test(value)) return false;
+  return value.startsWith(`${mediaFolder(uid, kind)}/`);
+}
 
 async function requireUser(req, res) {
   if (!auth) {
@@ -194,22 +227,25 @@ app.post("/api/media/signature", async (req, res) => {
   const user = await requireUser(req, res);
   if (!user) return;
   const timestamp = Math.floor(Date.now() / 1000);
-  const kind = String(req.body?.kind || "video")
-    .trim()
-    .toLowerCase();
-  const folder = kind === "story" ? "indo/stories" : "indo/videos";
+  const kind = String(req.body?.kind || "video").trim().toLowerCase();
+  if (kind !== "video" && kind !== "story")
+    return res.status(400).json({ ok: false, error: "Invalid media type." });
+  const folder = mediaFolder(user.uid, kind);
   try {
     return res.json({
       ok: true,
       ...getCloudinaryConfig(),
       timestamp,
       folder,
-      signature: createCloudinarySignature(timestamp, { folder }),
+      signature: createCloudinarySignature(timestamp, {
+        folder,
+        resource_type: kind === "story" ? "image" : "video",
+      }),
     });
   } catch {
     return res
       .status(503)
-      .json({ ok: false, error: "Video upload is temporarily unavailable." });
+      .json({ ok: false, error: "Media upload is temporarily unavailable." });
   }
 });
 
@@ -221,13 +257,19 @@ app.post("/api/media/videos", async (req, res) => {
   const mediaType = req.body?.mediaType === "reel" ? "reel" : "video";
   const publicId = String(req.body?.publicId || "").trim();
   const secureUrl = String(req.body?.secureUrl || "").trim();
-  const title = String(req.body?.title || "")
-    .trim()
-    .slice(0, 120);
-  const caption = String(req.body?.caption || "")
-    .trim()
-    .slice(0, 500);
-  if (!publicId || !secureUrl || !/^https:\/\//i.test(secureUrl))
+  const title = String(req.body?.title || "").trim().slice(0, 120);
+  const caption = String(req.body?.caption || "").trim().slice(0, 500);
+  const duration = Number(req.body?.duration || 0);
+  const width = Number(req.body?.width || 0);
+  const height = Number(req.body?.height || 0);
+  if (
+    !publicId ||
+    !isUserMediaPublicId(publicId, user.uid, "video") ||
+    !isCloudinarySecureUrl(secureUrl) ||
+    !Number.isFinite(duration) || duration < 0 || duration > 60 * 60 ||
+    !Number.isFinite(width) || width < 0 || width > 20000 ||
+    !Number.isFinite(height) || height < 0 || height > 20000
+  )
     return res
       .status(400)
       .json({ ok: false, error: "Uploaded video could not be published." });
@@ -248,9 +290,9 @@ app.post("/api/media/videos", async (req, res) => {
       publicId,
       secureUrl,
       videoUrl: secureUrl,
-      duration: Number(req.body?.duration || 0),
-      width: Number(req.body?.width || 0),
-      height: Number(req.body?.height || 0),
+      duration,
+      width,
+      height,
       views: 0,
       likes: 0,
       createdAt: admin.database.ServerValue.TIMESTAMP,
@@ -279,9 +321,7 @@ app.get("/api/media/videos", async (req, res) => {
   if (!db)
     return res.status(503).json({ ok: false, error: "Service unavailable." });
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
-  const type = String(req.query.type || "")
-    .trim()
-    .toLowerCase();
+  const type = String(req.query.type || "").trim().toLowerCase();
   try {
     const snapshot = await db.ref("videos").get();
     let videos = Object.values(snapshot.val() || {})
@@ -371,18 +411,9 @@ app.post("/api/media/videos/:videoId/delete", async (req, res) => {
         );
       }
     }
-    return res.json({
-      ok: true,
-      videoId,
-      deleted: true,
-      cloudinaryDeleted,
-    });
-  } catch (error) {
-    console.error("Video delete failed:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "Could not delete video.",
-    });
+    return res.json({ ok: true, videoId, deleted: true, cloudinaryDeleted });
+  } catch {
+    return res.status(500).json({ ok: false, error: "Could not delete video." });
   }
 });
 
@@ -393,10 +424,12 @@ app.post("/api/stories", async (req, res) => {
     return res.status(503).json({ ok: false, error: "Service unavailable." });
   const publicId = String(req.body?.publicId || "").trim();
   const secureUrl = String(req.body?.secureUrl || "").trim();
-  if (!publicId || !secureUrl)
-    return res
-      .status(400)
-      .json({ ok: false, error: "Uploaded story data is required." });
+  if (
+    !publicId ||
+    !isUserMediaPublicId(publicId, user.uid, "story") ||
+    !isCloudinarySecureUrl(secureUrl)
+  )
+    return res.status(400).json({ ok: false, error: "Uploaded story data is required." });
   try {
     const profile = (
       await syncCanonicalUser({ db, uid: user.uid, includeContent: false })
@@ -431,17 +464,10 @@ app.get("/api/account/profile/:username", async (req, res) => {
     if (!claim.exists() || !claim.val()?.uid)
       return res.status(404).json({ ok: false, error: "Profile not found." });
     const targetUid = String(claim.val().uid);
-    const canonical = await syncCanonicalUser({
-      db,
-      uid: targetUid,
-      includeContent: true,
-    });
+    const canonical = await syncCanonicalUser({ db, uid: targetUid, includeContent: true });
     return res.json({
       ok: true,
-      profile: {
-        ...canonical.profile,
-        accountType: canonical.settings.accountType,
-      },
+      profile: { ...canonical.profile, accountType: canonical.settings.accountType },
       stats: canonical.stats,
       social: canonical.social,
     });
@@ -473,18 +499,8 @@ app.get("/api/account/me", async (req, res) => {
   if (!db)
     return res.status(503).json({ ok: false, error: "Service unavailable." });
   try {
-    const canonical = await syncCanonicalUser({
-      db,
-      uid: user.uid,
-      includeContent: true,
-    });
-    return res.json({
-      ok: true,
-      profile: canonical.profile,
-      stats: canonical.stats,
-      social: canonical.social,
-      private: canonical.profilePrivate,
-    });
+    const canonical = await syncCanonicalUser({ db, uid: user.uid, includeContent: true });
+    return res.json({ ok: true, profile: canonical.profile, stats: canonical.stats, social: canonical.social, private: canonical.profilePrivate });
   } catch {
     return res.status(500).json({ ok: false, error: "Could not load profile." });
   }
@@ -493,17 +509,13 @@ app.get("/api/account/me", async (req, res) => {
 app.use((error, _req, res, _next) => {
   console.error(error);
   if (res.headersSent) return;
-  return res
-    .status(500)
-    .json({ ok: false, error: "Internal server error." });
+  return res.status(500).json({ ok: false, error: "Internal server error." });
 });
 
 async function start() {
   if (firebaseAdmin && db) {
     try {
-      const schemaSnapshot = await db
-        .ref("system/canonicalSchemaVersion/version")
-        .get();
+      const schemaSnapshot = await db.ref("system/canonicalSchemaVersion/version").get();
       if (Number(schemaSnapshot.val() || 0) < CANONICAL_SCHEMA_VERSION)
         await migrateAllUsersToCanonical({ db });
     } catch (error) {
@@ -518,10 +530,7 @@ async function start() {
   app.listen(PORT, () => console.log(`Indo backend listening on port ${PORT}`));
   setInterval(() => {
     cleanupInactiveAccounts({ db, auth }).catch((error) =>
-      console.warn(
-        "Scheduled account cleanup failed:",
-        error?.message || error,
-      ),
+      console.warn("Scheduled account cleanup failed:", error?.message || error),
     );
   }, CLEANUP_INTERVAL_MS).unref?.();
 }
