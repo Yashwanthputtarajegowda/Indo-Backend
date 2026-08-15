@@ -22,13 +22,9 @@ function entryList(snapshot) {
 async function resolveTargetUid(db, rawTarget) {
   const value = String(rawTarget || "").trim();
   if (!value) return "";
-  const direct = await db
-    .ref(`users/${value}`)
-    .get();
+  const direct = await db.ref(`users/${value}`).get();
   if (direct.exists()) return value;
-  const normalized = value
-    .toLowerCase()
-    .replace(/^@/, "");
+  const normalized = value.toLowerCase().replace(/^@/, "");
   const encoded = normalized
     .replace(/\./g, "%2E")
     .replace(/#/g, "%23")
@@ -36,10 +32,19 @@ async function resolveTargetUid(db, rawTarget) {
     .replace(/\//g, "%2F")
     .replace(/\[/g, "%5B")
     .replace(/\]/g, "%5D");
-  const claim = await db
-    .ref(`usernames/${encoded}`)
-    .get();
+  const claim = await db.ref(`usernames/${encoded}`).get();
   return String(claim.val()?.uid || "");
+}
+
+async function isFollower(db, targetUid, requesterUid) {
+  const follower = await db
+    .ref(`users/${targetUid}/social/followers/${requesterUid}`)
+    .get();
+  if (follower.exists()) return true;
+  const legacyFollower = await db
+    .ref(`users/${targetUid}/followers/${requesterUid}`)
+    .get();
+  return legacyFollower.exists();
 }
 
 export function createFollowRequestsRouter({
@@ -56,40 +61,22 @@ export function createFollowRequestsRouter({
       if (!db)
         return res.status(503).json({
           ok: false,
-          error:
-            "Firebase Admin is not configured on the backend.",
+          error: "Firebase Admin is not configured on the backend.",
         });
       try {
-        const [
-          incomingSnapshot,
-          outgoingSnapshot,
-        ] = await Promise.all([
-          db
-            .ref(
-              `users/${user.uid}/followRequests`,
-            )
-            .get(),
-          db
-            .ref(
-              `users/${user.uid}/sentFollowRequests`,
-            )
-            .get(),
+        const [incomingSnapshot, outgoingSnapshot] = await Promise.all([
+          db.ref(`users/${user.uid}/followRequests`).get(),
+          db.ref(`users/${user.uid}/sentFollowRequests`).get(),
         ]);
         return res.json({
           ok: true,
-          incoming: Object.values(
-            incomingSnapshot.val() || {},
-          ),
-          outgoing: Object.values(
-            outgoingSnapshot.val() || {},
-          ),
+          incoming: Object.values(incomingSnapshot.val() || {}),
+          outgoing: Object.values(outgoingSnapshot.val() || {}),
         });
-      } catch (error) {
+      } catch {
         return res.status(500).json({
           ok: false,
-          error:
-            error.message ||
-            "Could not load follow requests.",
+          error: "Could not load follow requests.",
         });
       }
     },
@@ -103,35 +90,27 @@ export function createFollowRequestsRouter({
       if (!db)
         return res.status(503).json({
           ok: false,
-          error:
-            "Firebase Admin is not configured on the backend.",
+          error: "Firebase Admin is not configured on the backend.",
         });
-      const requesterUid = String(
-        req.params.requesterUid || "",
-      ).trim();
+      const requesterUid = String(req.params.requesterUid || "").trim();
       const accept = req.body?.accept === true;
       if (!requesterUid)
-        return res
-          .status(400)
-          .json({
-            ok: false,
-            error: "Requester is required.",
-          });
-      try {
-        const result =
-          await respondToFollowRequest({
-            db,
-            ownerUid: user.uid,
-            requesterUid,
-            accept,
-          });
-        return res.json(result);
-      } catch (error) {
         return res.status(400).json({
           ok: false,
-          error:
-            error.message ||
-            "Could not respond to follow request.",
+          error: "Requester is required.",
+        });
+      try {
+        const result = await respondToFollowRequest({
+          db,
+          ownerUid: user.uid,
+          requesterUid,
+          accept,
+        });
+        return res.json(result);
+      } catch {
+        return res.status(400).json({
+          ok: false,
+          error: "Could not respond to follow request.",
         });
       }
     },
@@ -145,20 +124,20 @@ export function createFollowRequestsRouter({
       if (!db)
         return res.status(503).json({
           ok: false,
-          error:
-            "Firebase Admin is not configured on the backend.",
+          error: "Firebase Admin is not configured on the backend.",
         });
-      const targetUid = String(
-        req.body?.targetUid || "",
-      ).trim();
+      const targetUid = String(req.body?.targetUid || "").trim();
       const follow = req.body?.follow === true;
       if (!targetUid)
-        return res
-          .status(400)
-          .json({
-            ok: false,
-            error: "Target user is required.",
-          });
+        return res.status(400).json({
+          ok: false,
+          error: "Target user is required.",
+        });
+      if (targetUid === user.uid)
+        return res.status(400).json({
+          ok: false,
+          error: "You cannot follow yourself.",
+        });
       try {
         const result = await toggleFollow({
           db,
@@ -167,12 +146,10 @@ export function createFollowRequestsRouter({
           follow,
         });
         return res.json({ ok: true, ...result });
-      } catch (error) {
+      } catch {
         return res.status(400).json({
           ok: false,
-          error:
-            error.message ||
-            "Could not update follow status.",
+          error: "Could not update follow status.",
         });
       }
     },
@@ -186,12 +163,14 @@ export function createFollowRequestsRouter({
       if (!db)
         return res.status(503).json({
           ok: false,
-          error:
-            "Firebase Admin is not configured on the backend.",
+          error: "Firebase Admin is not configured on the backend.",
         });
-      const targetUid = String(
-        req.params.targetUid || "",
-      ).trim();
+      const targetUid = String(req.params.targetUid || "").trim();
+      if (!targetUid)
+        return res.status(400).json({
+          ok: false,
+          error: "Target user is required.",
+        });
       try {
         const result = await getFollowStatus({
           db,
@@ -199,12 +178,10 @@ export function createFollowRequestsRouter({
           targetUid,
         });
         return res.json({ ok: true, ...result });
-      } catch (error) {
+      } catch {
         return res.status(500).json({
           ok: false,
-          error:
-            error.message ||
-            "Could not load follow status.",
+          error: "Could not load follow status.",
         });
       }
     },
@@ -218,36 +195,32 @@ export function createFollowRequestsRouter({
       if (!db)
         return res.status(503).json({
           ok: false,
-          error:
-            "Firebase Admin is not configured on the backend.",
+          error: "Firebase Admin is not configured on the backend.",
         });
       try {
-        const targetUid = await resolveTargetUid(
-          db,
-          req.params.targetUid,
-        );
+        const targetUid = await resolveTargetUid(db, req.params.targetUid);
         if (!targetUid)
-          return res
-            .status(404)
-            .json({
-              ok: false,
-              error: "Profile not found.",
-            });
-        const canonical = await syncCanonicalUser(
-          {
-            db,
-            uid: targetUid,
-            includeContent: true,
-          },
-        );
+          return res.status(404).json({
+            ok: false,
+            error: "Profile not found.",
+          });
+        const canonical = await syncCanonicalUser({
+          db,
+          uid: targetUid,
+          includeContent: true,
+        });
+        const privateAccount = canonical.settings.accountType === "private";
+        const ownProfile = String(user.uid) === String(targetUid);
+        const follower = ownProfile
+          ? true
+          : await isFollower(db, targetUid, user.uid);
+        const canViewPrivateContent =
+          !privateAccount || ownProfile || follower;
+
         const publicProfile = {
           uid: targetUid,
-          username:
-            canonical.profile.username || "",
-          userId:
-            canonical.profile.userId ||
-            canonical.profile.username ||
-            "",
+          username: canonical.profile.username || "",
+          userId: canonical.profile.userId || canonical.profile.username || "",
           name:
             canonical.profile.name ||
             canonical.profile.displayName ||
@@ -258,118 +231,75 @@ export function createFollowRequestsRouter({
             "Indo User",
           bio: canonical.profile.bio || "",
           photoURL:
-            canonical.profile.photoURL ||
-            canonical.profile.avatarUrl ||
-            "",
-          accountType:
-            canonical.settings.accountType,
+            canonical.profile.photoURL || canonical.profile.avatarUrl || "",
+          accountType: canonical.settings.accountType,
           isVerified: Boolean(
-            canonical.profile.isVerified ||
-            canonical.verification.isVerified,
+            canonical.profile.isVerified || canonical.verification.isVerified,
           ),
         };
+
         return res.json({
           ok: true,
           targetUid,
           profile: publicProfile,
           stats: canonical.stats,
           social: {
-            followersCount:
-              canonical.stats.followersCount,
-            followingCount:
-              canonical.stats.followingCount,
+            followersCount: canonical.stats.followersCount,
+            followingCount: canonical.stats.followingCount,
           },
-          videos: Object.values(
-            canonical.content.videos,
-          ),
-          stories: Object.values(
-            canonical.content.stories,
-          ),
+          videos: canViewPrivateContent
+            ? Object.values(canonical.content.videos)
+            : [],
+          stories: canViewPrivateContent
+            ? Object.values(canonical.content.stories)
+            : [],
+          privateContentHidden: !canViewPrivateContent,
         });
-      } catch (error) {
-        return res
-          .status(500)
-          .json({
-            ok: false,
-            error:
-              error.message ||
-              "Could not load profile.",
-          });
+      } catch {
+        return res.status(500).json({
+          ok: false,
+          error: "Could not load profile.",
+        });
       }
     },
   );
 
-  async function listRelationship(
-    req,
-    res,
-    relation,
-  ) {
+  async function listRelationship(req, res, relation) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
       return res.status(503).json({
         ok: false,
-        error:
-          "Firebase Admin is not configured on the backend.",
+        error: "Firebase Admin is not configured on the backend.",
       });
-    const rawTarget = String(
-      req.params.targetUid || "",
-    ).trim();
+    const rawTarget = String(req.params.targetUid || "").trim();
     if (!rawTarget)
-      return res
-        .status(400)
-        .json({
-          ok: false,
-          error: "Target user is required.",
-        });
+      return res.status(400).json({
+        ok: false,
+        error: "Target user is required.",
+      });
     try {
-      const targetUid = await resolveTargetUid(
-        db,
-        rawTarget,
-      );
+      const targetUid = await resolveTargetUid(db, rawTarget);
       if (!targetUid)
-        return res
-          .status(404)
-          .json({
-            ok: false,
-            error: "Profile not found.",
-          });
+        return res.status(404).json({
+          ok: false,
+          error: "Profile not found.",
+        });
       const canonical = await syncCanonicalUser({
         db,
         uid: targetUid,
         includeContent: false,
       });
-      if (
-        String(user.uid) !== targetUid &&
-        canonical.settings.accountType ===
-          "private"
-      ) {
-        const follower = await db
-          .ref(
-            `users/${targetUid}/social/followers/${user.uid}`,
-          )
-          .get();
-        const legacyFollower = follower.exists()
-          ? follower
-          : await db
-              .ref(
-                `users/${targetUid}/followers/${user.uid}`,
-              )
-              .get();
-        if (!legacyFollower.exists())
+      if (String(user.uid) !== targetUid && canonical.settings.accountType === "private") {
+        if (!(await isFollower(db, targetUid, user.uid)))
           return res.status(403).json({
             ok: false,
-            error:
-              "Follow this private account to view its followers/following.",
+            error: "Follow this private account to view its followers/following.",
           });
       }
       const relationItems =
-        relation === "followers"
-          ? canonical.social.followers
-          : canonical.social.following;
-      const items = entryList({
-        val: () => relationItems,
-      });
+        relation === "followers" ? canonical.social.followers : canonical.social.following;
+      const items = entryList({ val: () => relationItems });
       return res.json({
         ok: true,
         targetUid,
@@ -377,25 +307,21 @@ export function createFollowRequestsRouter({
         count: items.length,
         items,
       });
-    } catch (error) {
+    } catch {
       return res.status(500).json({
         ok: false,
-        error:
-          error.message ||
-          `Could not load ${relation}.`,
+        error: `Could not load ${relation}.`,
       });
     }
   }
 
   router.get(
     "/social/followers/:targetUid",
-    (req, res) =>
-      listRelationship(req, res, "followers"),
+    (req, res) => listRelationship(req, res, "followers"),
   );
   router.get(
     "/social/following/:targetUid",
-    (req, res) =>
-      listRelationship(req, res, "following"),
+    (req, res) => listRelationship(req, res, "following"),
   );
 
   return router;
