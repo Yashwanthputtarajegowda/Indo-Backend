@@ -5,6 +5,7 @@ import {
   getFollowStatus,
 } from "../services/social-follow.js";
 import { syncCanonicalUser } from "../services/user-canonical.js";
+import { canAccessMedia, isBlockedEitherWay } from "./social-block.js";
 
 function entryList(snapshot) {
   const value = snapshot?.val?.() || {};
@@ -12,11 +13,24 @@ function entryList(snapshot) {
     .filter((item) => item && item.uid)
     .map((item) => ({
       uid: String(item.uid),
-      userId: String(
-        item.userId || item.username || "",
-      ),
+      userId: String(item.userId || item.username || ""),
       name: String(item.name || "Indo User"),
     }));
+}
+
+function clean(value, max = 160) {
+  return String(value || "").trim().slice(0, max);
+}
+
+function publicProfile(uid, value = {}) {
+  const profile = value?.profile || value || {};
+  return {
+    uid: String(uid),
+    userId: String(profile.userId || profile.username || ""),
+    username: String(profile.username || profile.userId || ""),
+    name: String(profile.name || profile.displayName || "Indo User"),
+    photoURL: String(profile.photoURL || profile.avatarUrl || ""),
+  };
 }
 
 async function resolveTargetUid(db, rawTarget) {
@@ -290,15 +304,21 @@ export function createFollowRequestsRouter({
         uid: targetUid,
         includeContent: false,
       });
-      if (String(user.uid) !== targetUid && canonical.settings.accountType === "private") {
+      if (
+        String(user.uid) !== targetUid &&
+        canonical.settings.accountType === "private"
+      ) {
         if (!(await isFollower(db, targetUid, user.uid)))
           return res.status(403).json({
             ok: false,
-            error: "Follow this private account to view its followers/following.",
+            error:
+              "Follow this private account to view its followers/following.",
           });
       }
       const relationItems =
-        relation === "followers" ? canonical.social.followers : canonical.social.following;
+        relation === "followers"
+          ? canonical.social.followers
+          : canonical.social.following;
       const items = entryList({ val: () => relationItems });
       return res.json({
         ok: true,
@@ -323,6 +343,127 @@ export function createFollowRequestsRouter({
     "/social/following/:targetUid",
     (req, res) => listRelationship(req, res, "following"),
   );
+
+  // Authenticated users can see the likes list for any media they can view.
+  router.get("/media/:mediaId/likes", async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    const mediaId = clean(req.params.mediaId, 120);
+    try {
+      const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
+      if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: "Media not found." });
+      const media = mediaSnapshot.val() || {};
+      if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
+      const snapshot = await db.ref(`videoLikes/${mediaId}`).get();
+      const ids = Object.entries(snapshot.val() || {})
+        .filter(([, value]) => Boolean(value))
+        .map(([uid]) => String(uid))
+        .slice(0, 500);
+      const items = [];
+      for (const uid of ids) {
+        const profileSnapshot = await db.ref(`users/${uid}`).get();
+        if (profileSnapshot.exists()) items.push(publicProfile(uid, profileSnapshot.val()));
+      }
+      return res.json({ ok: true, mediaId, count: items.length, items });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || "Could not load likes." });
+    }
+  });
+
+  // A comment may be removed only by its author or by the video's owner.
+  router.delete("/media/:mediaId/comments/:commentId", async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    const mediaId = clean(req.params.mediaId, 120);
+    const commentId = clean(req.params.commentId, 160);
+    try {
+      const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
+      if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: "Media not found." });
+      const media = mediaSnapshot.val() || {};
+      if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
+      const commentRef = db.ref(`videoComments/${mediaId}/${commentId}`);
+      const commentSnapshot = await commentRef.get();
+      if (!commentSnapshot.exists()) return res.status(404).json({ ok: false, error: "Comment not found." });
+      const comment = commentSnapshot.val() || {};
+      const isAuthor = String(comment.uid || "") === String(user.uid);
+      const isOwner = String(media.ownerUid || "") === String(user.uid);
+      if (!isAuthor && !isOwner)
+        return res.status(403).json({ ok: false, error: "You can delete only your own comment or a comment on your video." });
+      await commentRef.remove();
+      if (media.ownerUid)
+        await db.ref(`users/${media.ownerUid}/engagement/videos/${mediaId}/comments/${commentId}`).remove();
+      return res.json({ ok: true, deleted: true, mediaId, commentId });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || "Could not delete comment." });
+    }
+  });
+
+  // Saves are private: only the authenticated user's saved videos are returned.
+  router.get("/media/saved", async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    try {
+      const savesSnapshot = await db.ref("videoSaves").get();
+      const savedIds = [];
+      for (const [mediaId, value] of Object.entries(savesSnapshot.val() || {})) {
+        if (value && value[user.uid]) savedIds.push(String(mediaId));
+      }
+      const videos = [];
+      for (const mediaId of savedIds.slice(0, 200)) {
+        const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
+        if (!mediaSnapshot.exists()) continue;
+        const media = mediaSnapshot.val() || {};
+        if (!(await canAccessMedia({ db, requireUser, req, res, media }))) {
+          if (res.headersSent) return;
+          continue;
+        }
+        videos.push(media);
+      }
+      return res.json({ ok: true, count: videos.length, videos });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || "Could not load saved videos." });
+    }
+  });
+
+  // Stories are available to authenticated users. Private-account stories are
+  // visible only to the owner or accepted followers.
+  router.get("/stories", async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    try {
+      const snapshot = await db.ref("stories").get();
+      const now = Date.now();
+      const items = [];
+      for (const story of Object.values(snapshot.val() || {})) {
+        if (!story || Number(story.expiresAt || 0) <= now) continue;
+        const ownerUid = String(story.ownerUid || "");
+        if (!ownerUid) continue;
+        const ownerSnapshot = await db.ref(`users/${ownerUid}`).get();
+        if (!ownerSnapshot.exists()) continue;
+        const owner = ownerSnapshot.val() || {};
+        if (
+          await isBlockedEitherWay({
+            db,
+            requesterUid: user.uid,
+            ownerUid,
+          })
+        ) continue;
+        const accountType = String(owner.accountType || "public").toLowerCase();
+        if (accountType === "private" && ownerUid !== user.uid) {
+          if (!(await isFollower(db, ownerUid, user.uid))) continue;
+        }
+        items.push(story);
+      }
+      items.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+      return res.json({ ok: true, stories: items.slice(0, 200) });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error.message || "Could not load stories." });
+    }
+  });
 
   return router;
 }
