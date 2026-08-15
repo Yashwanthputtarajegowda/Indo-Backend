@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --import ./security-bootstrap.mjs --import ./security-router-guard.mjs server.js",
+    "start": "node --import ./security-bootstrap.mjs --import ./security-router-guard.mjs --import ./security-csrf.mjs server.js",
     "preflight:production": "node scripts/production-preflight.mjs"
   },
   "dependencies": {
