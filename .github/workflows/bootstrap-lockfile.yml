@@ -8,6 +8,10 @@ on:
       - "package.json"
       - ".github/workflows/bootstrap-lockfile.yml"
 
+concurrency:
+  group: bootstrap-package-lock
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
