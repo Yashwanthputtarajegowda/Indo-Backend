@@ -33,29 +33,32 @@ function tokenKey(req) {
   return `auth:${crypto.createHash("sha256").update(token).digest("hex")}`;
 }
 
-function actionLimiterFor(path) {
+function limiterFor(req) {
+  const path = String(req.path || "");
   if (/\/comments(?:\/|$)/.test(path)) return commentLimiter;
   if (/\/follow(?:-requests)?(?:\/|$)/.test(path)) return followLimiter;
   if (/\/(?:like|save|share|view)(?:\/|$)/.test(path)) return mutationLimiter;
   return null;
 }
 
-const originalUse = appUse;
-
 export function installAbuseGuards(app) {
   app.use((req, res, next) => {
-    const limiter = actionLimiterFor(String(req.path || ""));
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return next();
+    const limiter = limiterFor(req);
     if (!limiter) return next();
-    const originalIp = req.ip;
+
     const authKey = tokenKey(req);
-    if (authKey) {
-      const saved = req.ip;
+    if (!authKey) return limiter(req, res, next);
+
+    const originalIp = req.ip;
+    try {
       Object.defineProperty(req, "ip", { configurable: true, value: authKey });
       return limiter(req, res, () => {
-        Object.defineProperty(req, "ip", { configurable: true, value: saved });
+        Object.defineProperty(req, "ip", { configurable: true, value: originalIp });
         next();
       });
+    } catch {
+      return res.status(429).json({ ok: false, error: "Too many actions. Please try again later." });
     }
-    return limiter(req, res, next);
   });
 }
