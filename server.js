@@ -1,6 +1,8 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import admin from "firebase-admin";
 import { getDatabaseWithUrl } from "firebase-admin/database";
 import {
@@ -39,7 +41,7 @@ const DATABASE_URL =
   process.env.FIREBASE_DATABASE_URL ||
   "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260815-notifications-v1";
+const BACKEND_VERSION = "20260815-security-v1";
 const CANONICAL_SCHEMA_VERSION = 3;
 const PRODUCTION_FRONTEND_ORIGINS = [
   "https://yashwanthputtarajegowda.github.io",
@@ -83,18 +85,43 @@ const corsOptions = {
     if (CORS_ORIGINS.includes(normalizedOrigin)) return callback(null, true);
     return callback(new Error("Origin is not allowed by CORS."));
   },
-  methods: ["GET", "POST", "PATCH", "OPTIONS"],
+  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   maxAge: 86400,
 };
 
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  }),
+);
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "2mb", strict: true }));
 app.use((req, res, next) => {
   res.setHeader("X-Indo-Backend-Version", BACKEND_VERSION);
+  res.setHeader("Cache-Control", "no-store");
   next();
 });
+
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 180,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many requests. Please try again later." },
+});
+const authLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many authentication requests. Please try again later." },
+});
+app.use("/api", apiLimiter);
 
 app.get("/api/health", (_req, res) =>
   res.json({
@@ -130,23 +157,29 @@ async function requireUser(req, res) {
   if (!auth) {
     res.status(503).json({
       ok: false,
-      error: "Firebase Admin is not configured on the backend.",
+      error: "Authentication service is unavailable.",
     });
     return null;
   }
-  const header = req.headers.authorization || "";
-  if (!header.startsWith("Bearer ")) {
+  const header = String(req.headers.authorization || "");
+  if (!/^Bearer\s+\S+$/i.test(header)) {
     res.status(401).json({ ok: false, error: "Authentication required." });
     return null;
   }
-  try {
-    return await auth.verifyIdToken(header.slice(7));
-  } catch {
+  const token = header.replace(/^Bearer\s+/i, "").trim();
+  if (token.length < 20 || token.length > 16384) {
     res.status(401).json({ ok: false, error: "Invalid authentication token." });
+    return null;
+  }
+  try {
+    return await auth.verifyIdToken(token, true);
+  } catch {
+    res.status(401).json({ ok: false, error: "Invalid or expired authentication token." });
     return null;
   }
 }
 
+app.use("/api/auth", authLimiter);
 app.use("/api", createAccountContactRouter({ db, auth, requireUser }));
 app.use("/api", createAccountVisibilityRouter({ db, requireUser }));
 app.use("/api", createAccountClaimRouter({ db, requireUser }));
@@ -327,16 +360,15 @@ app.post("/api/media/videos/:videoId/delete", async (req, res) => {
       .ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`)
       .transaction((current) => Math.max(0, (Number(current) || 0) - 1));
     let cloudinaryDeleted = false;
-    let cloudinaryError = "";
     if (video.publicId) {
       try {
         const result = await destroyCloudinaryVideo(video.publicId);
         cloudinaryDeleted = result?.result !== "error";
       } catch (error) {
-        cloudinaryError = String(
-          error?.message || error || "Cloudinary delete failed.",
+        console.warn(
+          "Cloudinary video delete failed:",
+          String(error?.message || error || "unknown error"),
         );
-        console.warn("Cloudinary video delete failed:", cloudinaryError);
       }
     }
     return res.json({
@@ -344,14 +376,12 @@ app.post("/api/media/videos/:videoId/delete", async (req, res) => {
       videoId,
       deleted: true,
       cloudinaryDeleted,
-      cloudinaryError: cloudinaryError || undefined,
     });
   } catch (error) {
     console.error("Video delete failed:", error);
     return res.status(500).json({
       ok: false,
       error: "Could not delete video.",
-      detail: String(error?.message || error || "Unknown error."),
     });
   }
 });
@@ -386,83 +416,7 @@ app.post("/api/stories", async (req, res) => {
     await saveCanonicalStory({ db, uid: user.uid, story });
     return res.status(201).json({ ok: true, story });
   } catch {
-    return res.status(500).json({ ok: false, error: "Could not save story." });
-  }
-});
-
-app.get("/api/stories", async (req, res) => {
-  const user = await requireUser(req, res);
-  if (!user) return;
-  if (!db)
-    return res.status(503).json({ ok: false, error: "Service unavailable." });
-  try {
-    const snapshot = await db
-      .ref("stories")
-      .orderByChild("expiresAt")
-      .startAt(Date.now())
-      .get();
-    const stories = Object.values(snapshot.val() || {}).sort(
-      (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0),
-    );
-    return res.json({ ok: true, stories });
-  } catch {
-    return res
-      .status(500)
-      .json({ ok: false, error: "Could not load stories." });
-  }
-});
-
-app.post("/api/stories/:storyId/delete", async (req, res) => {
-  const user = await requireUser(req, res);
-  if (!user) return;
-  if (!db)
-    return res.status(503).json({ ok: false, error: "Service unavailable." });
-  const storyId = String(req.params.storyId || "").trim();
-  if (!storyId)
-    return res.status(400).json({ ok: false, error: "Story ID is required." });
-  try {
-    const storyRef = db.ref(`stories/${storyId}`);
-    const snapshot = await storyRef.get();
-    if (!snapshot.exists())
-      return res.json({
-        ok: true,
-        storyId,
-        alreadyDeleted: true,
-        cloudinaryDeleted: false,
-      });
-    const story = snapshot.val() || {};
-    if (String(story.ownerUid || "") !== String(user.uid || ""))
-      return res
-        .status(403)
-        .json({ ok: false, error: "You can delete only your own story." });
-    await storyRef.remove();
-    await deleteCanonicalStory({ db, uid: user.uid, storyId });
-    let cloudinaryDeleted = false;
-    let cloudinaryError = "";
-    if (story.publicId) {
-      try {
-        const result = await destroyCloudinaryVideo(story.publicId);
-        cloudinaryDeleted = result?.result !== "error";
-      } catch (error) {
-        cloudinaryError = String(
-          error?.message || error || "Cloudinary delete failed.",
-        );
-        console.warn("Cloudinary story delete failed:", cloudinaryError);
-      }
-    }
-    return res.json({
-      ok: true,
-      storyId,
-      deleted: true,
-      cloudinaryDeleted,
-      cloudinaryError: cloudinaryError || undefined,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      ok: false,
-      error: "Could not delete story.",
-      detail: String(error?.message || error || "Unknown error."),
-    });
+    return res.status(500).json({ ok: false, error: "Could not publish story." });
   }
 });
 
@@ -482,20 +436,17 @@ app.get("/api/account/profile/:username", async (req, res) => {
       uid: targetUid,
       includeContent: true,
     });
-    const publicProfile = {
-      ...canonical.profile,
-      accountType: canonical.settings.accountType,
-    };
     return res.json({
       ok: true,
-      profile: publicProfile,
+      profile: {
+        ...canonical.profile,
+        accountType: canonical.settings.accountType,
+      },
       stats: canonical.stats,
       social: canonical.social,
     });
   } catch {
-    return res
-      .status(500)
-      .json({ ok: false, error: "Could not load profile." });
+    return res.status(500).json({ ok: false, error: "Could not load profile." });
   }
 });
 
@@ -512,9 +463,7 @@ app.get("/api/account/public-profile/:uid", async (req, res) => {
     const profile = profileSnapshot.val() || {};
     return res.json({ ok: true, profile: profile.profile || profile });
   } catch {
-    return res
-      .status(500)
-      .json({ ok: false, error: "Could not load profile." });
+    return res.status(500).json({ ok: false, error: "Could not load profile." });
   }
 });
 
@@ -537,44 +486,7 @@ app.get("/api/account/me", async (req, res) => {
       private: canonical.profilePrivate,
     });
   } catch {
-    return res
-      .status(500)
-      .json({ ok: false, error: "Could not load profile." });
-  }
-});
-
-app.patch("/api/account/profile", async (req, res) => {
-  const user = await requireUser(req, res);
-  if (!user) return;
-  if (!db)
-    return res.status(503).json({ ok: false, error: "Service unavailable." });
-  const name = String(req.body?.name || "").trim();
-  const bio = String(req.body?.bio || "")
-    .trim()
-    .slice(0, 160);
-  if (!name)
-    return res.status(400).json({ ok: false, error: "User Name is required." });
-  try {
-    const userRef = db.ref(`users/${user.uid}`);
-    const previous = (await userRef.get()).val() || {};
-    const nextProfile = {
-      ...(previous.profile || {}),
-      uid: user.uid,
-      name,
-      bio,
-    };
-    await userRef.update({
-      name,
-      bio,
-      profile: nextProfile,
-      updatedAt: Date.now(),
-      "profile/updatedAt": Date.now(),
-    });
-    return res.json({ ok: true, profile: nextProfile });
-  } catch {
-    return res
-      .status(500)
-      .json({ ok: false, error: "Could not update profile." });
+    return res.status(500).json({ ok: false, error: "Could not load profile." });
   }
 });
 
@@ -583,7 +495,7 @@ app.use((error, _req, res, _next) => {
   if (res.headersSent) return;
   return res
     .status(500)
-    .json({ ok: false, error: error?.message || "Internal server error." });
+    .json({ ok: false, error: "Internal server error." });
 });
 
 async function start() {
