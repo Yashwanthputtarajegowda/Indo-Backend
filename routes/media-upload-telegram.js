@@ -1,0 +1,112 @@
+import express from "express";
+import admin from "firebase-admin";
+import { mirrorVideoBuffer, telegramStorageConfigured } from "../services/telegram-storage.js";
+import { canonicalUserRoot, syncCanonicalUser } from "../services/user-canonical.js";
+import { saveCanonicalVideo } from "../services/canonical-content.js";
+
+function safeText(value, max) {
+  return String(value || "").trim().slice(0, max);
+}
+
+function parseBool(value, fallback = true) {
+  if (value === undefined || value === null || value === "") return fallback;
+  return String(value).trim().toLowerCase() !== "false";
+}
+
+export function createTelegramMediaUploadRouter({ db, requireUser }) {
+  const router = express.Router();
+
+  router.post(
+    "/media/videos/upload-telegram",
+    express.raw({ type: /^video\/.+$/i, limit: "50mb" }),
+    async (req, res) => {
+      const user = await requireUser(req, res);
+      if (!user) return;
+      if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+      if (!telegramStorageConfigured()) {
+        return res.status(503).json({ ok: false, error: "Telegram storage is not configured." });
+      }
+
+      const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      if (!body.length) {
+        return res.status(400).json({ ok: false, error: "Video file is missing." });
+      }
+      if (body.length > 50 * 1024 * 1024) {
+        return res.status(413).json({ ok: false, error: "This upload is larger than the current Telegram Bot API limit." });
+      }
+
+      const mediaType = String(req.query.mediaType || "video").trim().toLowerCase() === "reel" ? "reel" : "video";
+      const title = safeText(req.query.title, 120) || (mediaType === "reel" ? "Untitled reel" : "Untitled video");
+      const caption = safeText(req.query.caption, 500);
+      const privacy = ["public", "followers", "private"].includes(String(req.query.privacy || "public"))
+        ? String(req.query.privacy || "public")
+        : "public";
+      const allowComments = parseBool(req.query.allowComments, true);
+      const allowDuet = parseBool(req.query.allowDuet, true);
+      const category = safeText(req.query.category, 60);
+      const location = safeText(req.query.location, 120);
+      const tags = String(req.query.tags || "")
+        .split(",")
+        .map((tag) => tag.trim().replace(/^#/, ""))
+        .filter(Boolean)
+        .slice(0, 20);
+      const duration = Math.max(0, Number(req.query.duration) || 0);
+      const width = Math.max(0, Number(req.query.width) || 0);
+      const height = Math.max(0, Number(req.query.height) || 0);
+      const fileName = safeText(req.headers["x-file-name"], 140) || `${mediaType}-${Date.now()}.mp4`;
+
+      try {
+        const profile = (await syncCanonicalUser({ db, uid: user.uid, includeContent: false })).profile;
+        const telegram = await mirrorVideoBuffer({
+          buffer: body,
+          caption: caption || title,
+          fileName,
+        });
+
+        const videoRef = db.ref("videos").push();
+        const video = {
+          id: videoRef.key,
+          mediaType,
+          ownerUid: user.uid,
+          creator: profile.username || `@${user.uid.slice(0, 8)}`,
+          creatorName: profile.name || "Indo User",
+          title,
+          caption,
+          privacy,
+          allowComments,
+          allowDuet,
+          category,
+          tags,
+          location,
+          duration,
+          width,
+          height,
+          views: 0,
+          likes: 0,
+          createdAt: admin.database.ServerValue.TIMESTAMP,
+          storage: { provider: "telegram", source: "direct-upload" },
+          telegram: {
+            provider: "telegram",
+            messageId: telegram.messageId,
+            fileId: telegram.fileId,
+            fileUniqueId: telegram.fileUniqueId,
+            fileName: telegram.fileName,
+            chatId: String(process.env.TELEGRAM_CHAT_ID || "").trim(),
+          },
+        };
+
+        await videoRef.set(video);
+        await saveCanonicalVideo({ db, uid: user.uid, video: { ...video, createdAt: Date.now() } });
+        await db.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => (Number(current) || 0) + 1);
+        await db.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).transaction((current) => (Number(current) || 0) + 1);
+
+        return res.status(201).json({ ok: true, video });
+      } catch (error) {
+        console.error("Direct Telegram video upload failed:", error?.message || error);
+        return res.status(502).json({ ok: false, error: error?.message || "Could not upload video to Telegram." });
+      }
+    },
+  );
+
+  return router;
+}
