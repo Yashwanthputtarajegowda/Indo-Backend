@@ -10,7 +10,7 @@ async function telegramCall(method, body) {
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not configured.");
 
   const response = await fetch(
-    `https://api.telegram.org/bot${encodeURIComponent(token)}/${method}`,
+    `https://api.telegram.org/bot${token}/${method}`,
     { method: "POST", body },
   );
   const data = await response.json().catch(() => ({}));
@@ -99,8 +99,9 @@ export async function getTelegramFileUrl(fileId) {
   const filePath = String(file?.file_path || "").trim();
   if (!filePath) throw new Error("Telegram file path is missing.");
 
-  // Telegram file URLs require the bot token in the path in its original form.
-  // Do not encode the token here; the Bot API file endpoint expects the literal token.
+  // Telegram bot tokens contain ':' and are already valid URL path segments.
+  // Do not percent-encode the token here: the Bot API file endpoint expects the
+  // literal `bot<TOKEN>/<file_path>` path that also works with direct fetches.
   return `https://api.telegram.org/file/bot${BOT_TOKEN()}/${filePath}`;
 }
 
