@@ -1,15 +1,20 @@
 import express from "express";
 
 function publicProfile(profile = {}) {
+  const canonical = profile.profile && typeof profile.profile === "object" ? profile.profile : profile;
+  const source = { ...profile, ...canonical };
   return {
-    uid: profile.uid || "",
-    userId: profile.username || "",
-    name: profile.name || "Indo User",
-    bio: profile.bio || "",
-    accountType: profile.accountType === "private" ? "private" : "public",
-    followersCount: Number(profile.followersCount || 0),
-    followingCount: Number(profile.followingCount || 0),
-    postsCount: Number(profile.postsCount || 0),
+    uid: source.uid || "",
+    userId: source.username || source.userId || "",
+    name: source.name || source.displayName || "Indo User",
+    bio: source.bio || "",
+    location: source.location || "",
+    avatarUrl: source.avatarUrl || source.photoURL || source.photoUrl || "",
+    photoURL: source.photoURL || source.avatarUrl || source.photoUrl || "",
+    accountType: source.accountType === "private" ? "private" : "public",
+    followersCount: Number(source.followersCount || source.stats?.followersCount || 0),
+    followingCount: Number(source.followingCount || source.stats?.followingCount || 0),
+    postsCount: Number(source.postsCount || source.stats?.postsCount || 0),
   };
 }
 
@@ -106,7 +111,10 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
     } catch (error) {
       return res
         .status(500)
-        .json({ ok: false, error: error.message || "Could not load profile." });
+        .json({
+          ok: false,
+          error: error.message || "Could not load profile.",
+        });
     }
   });
 
