@@ -5,6 +5,12 @@ function asNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function safeMediaId(value) {
+  const id = String(value || "").trim();
+  if (!/^[A-Za-z0-9_-]{1,120}$/.test(id)) return "";
+  return id;
+}
+
 function hours(seconds) {
   return asNumber(seconds) / 3600;
 }
@@ -112,11 +118,10 @@ export function createEarningsRouter({
             uid: user.uid,
           })),
         });
-      } catch (error) {
+      } catch {
         return res.status(500).json({
           ok: false,
           error:
-            error.message ||
             "Could not load earning status.",
         });
       }
@@ -142,11 +147,10 @@ export function createEarningsRouter({
             uid: user.uid,
           })),
         });
-      } catch (error) {
+      } catch {
         return res.status(500).json({
           ok: false,
           error:
-            error.message ||
             "Could not load earning summary.",
         });
       }
@@ -191,11 +195,10 @@ export function createEarningsRouter({
               : null,
           });
         return res.json({ ok: true, enabled });
-      } catch (error) {
+      } catch {
         return res.status(500).json({
           ok: false,
           error:
-            error.message ||
             "Could not update earning status.",
         });
       }
@@ -213,9 +216,7 @@ export function createEarningsRouter({
           error:
             "Firebase Admin is not configured on the backend.",
         });
-      const mediaId = String(
-        req.body?.mediaId || "",
-      ).trim();
+      const mediaId = safeMediaId(req.body?.mediaId);
       const requestedSeconds = asNumber(
         req.body?.seconds,
       );
@@ -275,11 +276,10 @@ export function createEarningsRouter({
             counter.snapshot.val(),
           ),
         });
-      } catch (error) {
+      } catch {
         return res.status(500).json({
           ok: false,
           error:
-            error.message ||
             "Could not record watch progress.",
         });
       }
