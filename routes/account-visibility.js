@@ -32,9 +32,7 @@ async function saveCanonicalProfile({ req, res, db, requireUser }) {
 
     const previous = snapshot.val() || {};
     const previousProfile =
-      previous.profile && typeof previous.profile === "object"
-        ? previous.profile
-        : {};
+      previous.profile && typeof previous.profile === "object" ? previous.profile : {};
     const now = Date.now();
 
     const profile = {
@@ -43,19 +41,10 @@ async function saveCanonicalProfile({ req, res, db, requireUser }) {
       name,
       displayName: name,
       bio: cleanText(req.body?.bio ?? previousProfile.bio ?? previous.bio, 160),
-      location: cleanText(
-        req.body?.location ?? previousProfile.location ?? previous.location,
-        100,
-      ),
-      website: cleanText(
-        req.body?.website ?? previousProfile.website ?? previous.website,
-        200,
-      ),
+      location: cleanText(req.body?.location ?? previousProfile.location ?? previous.location, 100),
+      website: cleanText(req.body?.website ?? previousProfile.website ?? previous.website, 200),
       role: cleanText(
-        req.body?.role ??
-          previousProfile.role ??
-          previous.role ??
-          "Content Creator",
+        req.body?.role ?? previousProfile.role ?? previous.role ?? "Content Creator",
         60,
       ),
       interests: cleanText(
@@ -63,10 +52,7 @@ async function saveCanonicalProfile({ req, res, db, requireUser }) {
         240,
       ),
       language: cleanText(
-        req.body?.language ??
-          previousProfile.language ??
-          previous.language ??
-          "English",
+        req.body?.language ?? previousProfile.language ?? previous.language ?? "English",
         40,
       ),
       accountType:
@@ -119,15 +105,12 @@ export function createAccountVisibilityRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db) {
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     }
-    const accountType =
-      req.body?.accountType === "private" ? "private" : "public";
+    const accountType = req.body?.accountType === "private" ? "private" : "public";
     try {
       const userRef = db.ref(`users/${user.uid}`);
       const snapshot = await userRef.get();
@@ -136,12 +119,10 @@ export function createAccountVisibilityRouter({ db, requireUser }) {
       await userRef.update({ accountType, visibilityUpdatedAt: Date.now() });
       return res.json({ ok: true, accountType });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not update account visibility.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not update account visibility.",
+      });
     }
   });
 

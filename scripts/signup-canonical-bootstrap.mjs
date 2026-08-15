@@ -11,16 +11,14 @@ function initFirebase() {
   return admin.initializeApp({
     credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
     databaseURL:
-      process.env.FIREBASE_DATABASE_URL ||
-      "https://indo-174f0-default-rtdb.firebaseio.com",
+      process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
   });
 }
 
 const firebaseApp = initFirebase();
 const db = firebaseApp
   ? getDatabaseWithUrl(
-      process.env.FIREBASE_DATABASE_URL ||
-        "https://indo-174f0-default-rtdb.firebaseio.com",
+      process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
       firebaseApp,
     )
   : null;
@@ -49,12 +47,10 @@ function userIdKey(userId) {
 
 async function verifyBearer(req, res) {
   if (!auth) {
-    res
-      .status(503)
-      .json({
-        ok: false,
-        error: "Firebase Admin is not configured on the backend.",
-      });
+    res.status(503).json({
+      ok: false,
+      error: "Firebase Admin is not configured on the backend.",
+    });
     return null;
   }
   const header = String(req.headers.authorization || "");
@@ -72,12 +68,8 @@ async function verifyBearer(req, res) {
 
 const originalPatch = express.application.patch;
 if (originalPatch && db) {
-  express.application.patch = function signupCanonicalProfilePatch(
-    path,
-    ...handlers
-  ) {
-    if (path !== "/api/account/profile")
-      return originalPatch.call(this, path, ...handlers);
+  express.application.patch = function signupCanonicalProfilePatch(path, ...handlers) {
+    if (path !== "/api/account/profile") return originalPatch.call(this, path, ...handlers);
     const handler = async (req, res) => {
       const user = await verifyBearer(req, res);
       if (!user) return;
@@ -89,14 +81,10 @@ if (originalPatch && db) {
       const bio = String(req.body?.bio || "")
         .trim()
         .slice(0, 160);
-      if (!uid)
-        return res.status(400).json({ ok: false, error: "User is required." });
+      if (!uid) return res.status(400).json({ ok: false, error: "User is required." });
       if (!validUserId(userId))
         return res.status(400).json({ ok: false, error: "Invalid User ID." });
-      if (!name)
-        return res
-          .status(400)
-          .json({ ok: false, error: "User Name is required." });
+      if (!name) return res.status(400).json({ ok: false, error: "User Name is required." });
       try {
         const usersSnapshot = await db.ref("users").get();
         const users = usersSnapshot.val() || {};
@@ -110,9 +98,7 @@ if (originalPatch && db) {
               "",
           );
           if (otherId && otherId === userId) {
-            return res
-              .status(409)
-              .json({ ok: false, error: `@${userId} is already taken.` });
+            return res.status(409).json({ ok: false, error: `@${userId} is already taken.` });
           }
         }
 
@@ -140,11 +126,7 @@ if (originalPatch && db) {
         };
         const profilePrivate = {
           ...(previous.profilePrivate || {}),
-          email:
-            user.email ||
-            previous.profilePrivate?.email ||
-            previous.email ||
-            "",
+          email: user.email || previous.profilePrivate?.email || previous.email || "",
         };
         const updates = {
           [`users/${uid}/profile`]: profile,
@@ -164,13 +146,11 @@ if (originalPatch && db) {
         return res.json({ ok: true, profile });
       } catch (error) {
         console.error("Canonical signup profile claim failed:", error);
-        return res
-          .status(500)
-          .json({
-            ok: false,
-            error: "Could not create the Indo profile.",
-            detail: String(error?.message || error || "Unknown error"),
-          });
+        return res.status(500).json({
+          ok: false,
+          error: "Could not create the Indo profile.",
+          detail: String(error?.message || error || "Unknown error"),
+        });
       }
     };
     return originalPatch.call(this, path, handler);

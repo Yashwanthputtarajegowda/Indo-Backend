@@ -19,9 +19,7 @@ export async function saveCanonicalVideo({ db, uid, video }) {
 
 export async function updateCanonicalVideoViews({ db, uid, videoId, views }) {
   if (!db || !uid || !videoId) return;
-  await db
-    .ref(`${canonicalVideoPath(uid, videoId)}/views`)
-    .set(Number(views) || 0);
+  await db.ref(`${canonicalVideoPath(uid, videoId)}/views`).set(Number(views) || 0);
   await db
     .ref(`${canonicalUserRoot(uid)}/stats/viewsCount`)
     .transaction((current) => Math.max(0, Number(current) || 0) + 1);
@@ -63,23 +61,17 @@ export async function setCanonicalVideoEngagement({
 }) {
   if (!db || !ownerUid || !mediaId || !actorUid) return;
   const base = `${canonicalUserRoot(ownerUid)}/engagement/videos/${mediaId}`;
-  const plural =
-    kind === "comment" ? "comments" : kind === "save" ? "saves" : "likes";
+  const plural = kind === "comment" ? "comments" : kind === "save" ? "saves" : "likes";
   await db.ref(`${base}/${plural}/${actorUid}`).set(value ? true : null);
-  if (count !== undefined)
-    await db.ref(`${base}/${plural}Count`).set(Number(count) || 0);
+  if (count !== undefined) await db.ref(`${base}/${plural}Count`).set(Number(count) || 0);
 }
 
 export async function saveCanonicalComment({ db, ownerUid, mediaId, comment }) {
   if (!db || !ownerUid || !mediaId || !comment?.id) return;
   await db
-    .ref(
-      `${canonicalUserRoot(ownerUid)}/engagement/videos/${mediaId}/comments/${comment.id}`,
-    )
+    .ref(`${canonicalUserRoot(ownerUid)}/engagement/videos/${mediaId}/comments/${comment.id}`)
     .set(comment);
   await db
-    .ref(
-      `${canonicalUserRoot(ownerUid)}/engagement/videos/${mediaId}/commentsCount`,
-    )
+    .ref(`${canonicalUserRoot(ownerUid)}/engagement/videos/${mediaId}/commentsCount`)
     .transaction((current) => Math.max(0, Number(current) || 0) + 1);
 }

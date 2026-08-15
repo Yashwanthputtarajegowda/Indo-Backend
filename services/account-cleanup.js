@@ -20,10 +20,7 @@ async function cleanupExpiredStories({ db, now = Date.now() }) {
       try {
         await destroyCloudinaryVideo(story.publicId);
       } catch (error) {
-        console.warn(
-          "Expired Cloudinary story delete failed:",
-          error?.message || error,
-        );
+        console.warn("Expired Cloudinary story delete failed:", error?.message || error);
       }
     }
 
@@ -59,9 +56,7 @@ export async function cleanupInactiveAccounts({ db, auth, now = Date.now() }) {
   for (const [uid, profile] of Object.entries(users)) {
     checked += 1;
 
-    const lastActiveAt = Number(
-      profile?.lastActiveAt || profile?.createdAt || 0,
-    );
+    const lastActiveAt = Number(profile?.lastActiveAt || profile?.createdAt || 0);
 
     if (!lastActiveAt || now - lastActiveAt < SIX_MONTHS_MS) {
       continue;

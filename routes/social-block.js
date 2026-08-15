@@ -33,13 +33,7 @@ export async function isBlockedEitherWay({ db, requesterUid, ownerUid }) {
   return requesterBlocked.exists() || ownerBlocked.exists();
 }
 
-export async function canViewPrivateMedia({
-  db,
-  requireUser,
-  req,
-  res,
-  ownerUid,
-}) {
+export async function canViewPrivateMedia({ db, requireUser, req, res, ownerUid }) {
   const header = req.headers.authorization || "";
   if (!header.startsWith("Bearer ")) {
     res.status(401).json({
@@ -55,9 +49,7 @@ export async function canViewPrivateMedia({
     res.status(403).json({ ok: false, error: "This user is blocked." });
     return false;
   }
-  const follower = await db
-    .ref(`users/${ownerUid}/followers/${requester.uid}`)
-    .get();
+  const follower = await db.ref(`users/${ownerUid}/followers/${requester.uid}`).get();
   if (!follower.exists()) {
     res.status(403).json({
       ok: false,
@@ -72,9 +64,7 @@ export async function canAccessMedia({ db, requireUser, req, res, media }) {
   const ownerUid = String(media?.ownerUid || "");
   if (!ownerUid) return false;
   const requester = await getOptionalRequester(req, requireUser);
-  if (
-    await isBlockedEitherWay({ db, requesterUid: requester?.uid, ownerUid })
-  ) {
+  if (await isBlockedEitherWay({ db, requesterUid: requester?.uid, ownerUid })) {
     res.status(403).json({ ok: false, error: "This user is blocked." });
     return false;
   }
@@ -109,10 +99,7 @@ function mixPriority(items, requesterUid, followingUids) {
   for (const entry of scored) {
     const ownerUid = String(entry.item?.ownerUid || "");
     const isFollowed = followingSet.has(ownerUid) || ownerUid === requesterUid;
-    const ageHours = Math.max(
-      0,
-      (Date.now() - Number(entry.item?.createdAt || 0)) / 36e5,
-    );
+    const ageHours = Math.max(0, (Date.now() - Number(entry.item?.createdAt || 0)) / 36e5);
     if (isFollowed) followed.push(entry);
     else if (ageHours <= 48) fresh.push(entry);
     else regular.push(entry);
@@ -129,9 +116,7 @@ function mixPriority(items, requesterUid, followingUids) {
     }
     return copy;
   };
-  return [...shuffle(followed), ...shuffle(fresh), ...shuffle(regular)].map(
-    ({ item }) => item,
-  );
+  return [...shuffle(followed), ...shuffle(fresh), ...shuffle(regular)].map(({ item }) => item);
 }
 
 export function createSocialBlockRouter({ db, requireUser }) {
@@ -169,21 +154,14 @@ export function createSocialBlockRouter({ db, requireUser }) {
       });
     const targetUid = clean(req.body?.targetUid);
     const blocked = req.body?.blocked === true;
-    if (!targetUid)
-      return res
-        .status(400)
-        .json({ ok: false, error: "Target user is required." });
+    if (!targetUid) return res.status(400).json({ ok: false, error: "Target user is required." });
     if (targetUid === user.uid)
-      return res
-        .status(400)
-        .json({ ok: false, error: "You cannot block your own account." });
+      return res.status(400).json({ ok: false, error: "You cannot block your own account." });
 
     try {
       const targetSnapshot = await db.ref(`users/${targetUid}`).get();
       if (!targetSnapshot.exists())
-        return res
-          .status(404)
-          .json({ ok: false, error: "Target profile not found." });
+        return res.status(404).json({ ok: false, error: "Target profile not found." });
 
       const target = targetSnapshot.val() || {};
       const blockPath = `users/${user.uid}/blocked/${targetUid}`;
@@ -248,10 +226,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
       });
     const requesterUid = clean(req.params.requesterUid);
     const accept = req.body?.accept === true;
-    if (!requesterUid)
-      return res
-        .status(400)
-        .json({ ok: false, error: "Requester is required." });
+    if (!requesterUid) return res.status(400).json({ ok: false, error: "Requester is required." });
     try {
       const result = await respondToFollowRequest({
         db,
@@ -271,17 +246,10 @@ export function createSocialBlockRouter({ db, requireUser }) {
   router.get("/stories", async (req, res, next) => {
     if (!db) return next();
     const requester = await getOptionalRequester(req, requireUser);
-    if (!requester)
-      return res
-        .status(401)
-        .json({ ok: false, error: "Authentication required." });
+    if (!requester) return res.status(401).json({ ok: false, error: "Authentication required." });
     try {
       const now = Date.now();
-      const snapshot = await db
-        .ref("stories")
-        .orderByChild("expiresAt")
-        .startAt(now)
-        .get();
+      const snapshot = await db.ref("stories").orderByChild("expiresAt").startAt(now).get();
       const stories = Object.values(snapshot.val() || {});
       const profileCache = new Map();
       const followerCache = new Map();
@@ -311,21 +279,14 @@ export function createSocialBlockRouter({ db, requireUser }) {
         }
         const key = `${ownerUid}:${requester.uid}`;
         if (!followerCache.has(key))
-          followerCache.set(
-            key,
-            db.ref(`users/${ownerUid}/followers/${requester.uid}`).get(),
-          );
+          followerCache.set(key, db.ref(`users/${ownerUid}/followers/${requester.uid}`).get());
         if ((await followerCache.get(key)).exists()) visible.push(story);
       }
 
-      visible.sort(
-        (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0),
-      );
+      visible.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
       return res.json({ ok: true, stories: visible });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ ok: false, error: error.message || "Could not load stories." });
+      return res.status(500).json({ ok: false, error: error.message || "Could not load stories." });
     }
   });
 
@@ -339,11 +300,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
       const requester = (req.headers.authorization || "").startsWith("Bearer ")
         ? await getOptionalRequester(req, requireUser)
         : null;
-      const snapshot = await db
-        .ref("videos")
-        .orderByChild("createdAt")
-        .limitToLast(100)
-        .get();
+      const snapshot = await db.ref("videos").orderByChild("createdAt").limitToLast(100).get();
       const allVideos = Object.values(snapshot.val() || {});
       const candidates =
         type === "video" || type === "reel"
@@ -355,9 +312,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
       const followingUids = new Set();
 
       if (requester?.uid) {
-        const followingSnapshot = await db
-          .ref(`users/${requester.uid}/following`)
-          .get();
+        const followingSnapshot = await db.ref(`users/${requester.uid}/following`).get();
         for (const uid of Object.keys(followingSnapshot.val() || {}))
           followingUids.add(String(uid));
       }
@@ -387,10 +342,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
         }
         const key = `${ownerUid}:${requester.uid}`;
         if (!followerCache.has(key))
-          followerCache.set(
-            key,
-            db.ref(`users/${ownerUid}/followers/${requester.uid}`).get(),
-          );
+          followerCache.set(key, db.ref(`users/${ownerUid}/followers/${requester.uid}`).get());
         if ((await followerCache.get(key)).exists()) visible.push(video);
       }
 
@@ -401,27 +353,20 @@ export function createSocialBlockRouter({ db, requireUser }) {
       const ordered = mixPriority(visible, requester?.uid || "", followingUids);
       return res.json({ ok: true, videos: ordered.slice(0, limit) });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ ok: false, error: error.message || "Could not load videos." });
+      return res.status(500).json({ ok: false, error: error.message || "Could not load videos." });
     }
   });
 
   router.post("/media/videos/:videoId/view", async (req, res, next) => {
     if (!db) return next();
     const videoId = clean(req.params.videoId);
-    if (!videoId)
-      return res
-        .status(400)
-        .json({ ok: false, error: "Video ID is required." });
+    if (!videoId) return res.status(400).json({ ok: false, error: "Video ID is required." });
     try {
       const videoRef = db.ref(`videos/${videoId}`);
       const snapshot = await videoRef.get();
-      if (!snapshot.exists())
-        return res.status(404).json({ ok: false, error: "Video not found." });
+      if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Video not found." });
       const video = snapshot.val() || {};
-      if (!(await canAccessMedia({ db, requireUser, req, res, media: video })))
-        return;
+      if (!(await canAccessMedia({ db, requireUser, req, res, media: video }))) return;
       const result = await videoRef
         .child("views")
         .transaction((current) => (Number(current) || 0) + 1);

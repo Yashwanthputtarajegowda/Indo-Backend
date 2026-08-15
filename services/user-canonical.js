@@ -24,10 +24,8 @@ function legacyUserValue(user, field) {
   return user?.profile?.[field] ?? user?.[field];
 }
 function mergeRelationValues(canonicalValue, legacyValue) {
-  const canonical =
-    canonicalValue && typeof canonicalValue === "object" ? canonicalValue : {};
-  const legacy =
-    legacyValue && typeof legacyValue === "object" ? legacyValue : {};
+  const canonical = canonicalValue && typeof canonicalValue === "object" ? canonicalValue : {};
+  const legacy = legacyValue && typeof legacyValue === "object" ? legacyValue : {};
   return { ...legacy, ...canonical };
 }
 async function readRelation(db, uid, relation) {
@@ -53,19 +51,14 @@ export async function syncCanonicalUser({ db, uid, includeContent = true }) {
     contentStories = {},
     engagementVideos = {};
   if (includeContent) {
-    const [
-      videosSnapshot,
-      storiesSnapshot,
-      likesSnapshot,
-      commentsSnapshot,
-      savesSnapshot,
-    ] = await Promise.all([
-      db.ref("videos").get(),
-      db.ref("stories").get(),
-      db.ref("videoLikes").get(),
-      db.ref("videoComments").get(),
-      db.ref("videoSaves").get(),
-    ]);
+    const [videosSnapshot, storiesSnapshot, likesSnapshot, commentsSnapshot, savesSnapshot] =
+      await Promise.all([
+        db.ref("videos").get(),
+        db.ref("stories").get(),
+        db.ref("videoLikes").get(),
+        db.ref("videoComments").get(),
+        db.ref("videoSaves").get(),
+      ]);
     const videos = videosSnapshot.val() || {},
       likes = likesSnapshot.val() || {},
       comments = commentsSnapshot.val() || {},
@@ -82,15 +75,11 @@ export async function syncCanonicalUser({ db, uid, includeContent = true }) {
         comments: commentMap,
         saves: saveMap,
         views: Number(video.views || 0),
-        likesCount: Object.keys(likeMap).filter((uidKey) =>
-          Boolean(likeMap[uidKey]),
-        ).length,
+        likesCount: Object.keys(likeMap).filter((uidKey) => Boolean(likeMap[uidKey])).length,
         commentsCount: Object.keys(commentMap).filter((commentKey) =>
           Boolean(commentMap[commentKey]),
         ).length,
-        savesCount: Object.keys(saveMap).filter((uidKey) =>
-          Boolean(saveMap[uidKey]),
-        ).length,
+        savesCount: Object.keys(saveMap).filter((uidKey) => Boolean(saveMap[uidKey])).length,
       };
     }
     for (const [id, item] of Object.entries(storiesSnapshot.val() || {})) {
@@ -99,9 +88,7 @@ export async function syncCanonicalUser({ db, uid, includeContent = true }) {
     }
   }
   const profile = compact(
-    Object.fromEntries(
-      PROFILE_FIELDS.map((field) => [field, legacyUserValue(user, field)]),
-    ),
+    Object.fromEntries(PROFILE_FIELDS.map((field) => [field, legacyUserValue(user, field)])),
   );
   profile.uid = cleanUid;
   profile.username = profile.username || user.username || user.userId || "";
@@ -163,29 +150,26 @@ export function canonicalFollowUpdate({
   follow,
 }) {
   const update = {};
-  update[`${canonicalUserRoot(followerUid)}/social/following/${targetUid}`] =
-    follow ? targetEntry : null;
-  update[`${canonicalUserRoot(targetUid)}/social/followers/${followerUid}`] =
-    follow ? followerEntry : null;
+  update[`${canonicalUserRoot(followerUid)}/social/following/${targetUid}`] = follow
+    ? targetEntry
+    : null;
+  update[`${canonicalUserRoot(targetUid)}/social/followers/${followerUid}`] = follow
+    ? followerEntry
+    : null;
   return update;
 }
 export async function migrateAllUsersToCanonical({ db }) {
   if (!db) throw new Error("Firebase database is not configured.");
   const users = (await db.ref("users").get()).val() || {};
   const updates = {};
-  const [
-    videosSnapshot,
-    storiesSnapshot,
-    likesSnapshot,
-    commentsSnapshot,
-    savesSnapshot,
-  ] = await Promise.all([
-    db.ref("videos").get(),
-    db.ref("stories").get(),
-    db.ref("videoLikes").get(),
-    db.ref("videoComments").get(),
-    db.ref("videoSaves").get(),
-  ]);
+  const [videosSnapshot, storiesSnapshot, likesSnapshot, commentsSnapshot, savesSnapshot] =
+    await Promise.all([
+      db.ref("videos").get(),
+      db.ref("stories").get(),
+      db.ref("videoLikes").get(),
+      db.ref("videoComments").get(),
+      db.ref("videoSaves").get(),
+    ]);
   const videos = videosSnapshot.val() || {},
     stories = storiesSnapshot.val() || {},
     likes = likesSnapshot.val() || {},
@@ -208,15 +192,10 @@ export async function migrateAllUsersToCanonical({ db }) {
       comments: commentMap,
       saves: saveMap,
       views: Number(video.views || 0),
-      likesCount: Object.keys(likeMap).filter((uidKey) =>
-        Boolean(likeMap[uidKey]),
-      ).length,
-      commentsCount: Object.keys(commentMap).filter((commentKey) =>
-        Boolean(commentMap[commentKey]),
-      ).length,
-      savesCount: Object.keys(saveMap).filter((uidKey) =>
-        Boolean(saveMap[uidKey]),
-      ).length,
+      likesCount: Object.keys(likeMap).filter((uidKey) => Boolean(likeMap[uidKey])).length,
+      commentsCount: Object.keys(commentMap).filter((commentKey) => Boolean(commentMap[commentKey]))
+        .length,
+      savesCount: Object.keys(saveMap).filter((uidKey) => Boolean(saveMap[uidKey])).length,
     };
   }
   for (const [id, story] of Object.entries(stories)) {
@@ -228,18 +207,10 @@ export async function migrateAllUsersToCanonical({ db }) {
   for (const uid of Object.keys(users)) {
     const root = canonicalUserRoot(uid),
       user = users[uid] || {};
-    const followers = mergeRelationValues(
-      user.social?.followers,
-      user.followers,
-    );
-    const following = mergeRelationValues(
-      user.social?.following,
-      user.following,
-    );
+    const followers = mergeRelationValues(user.social?.followers, user.followers);
+    const following = mergeRelationValues(user.social?.following, user.following);
     const profile = compact(
-      Object.fromEntries(
-        PROFILE_FIELDS.map((field) => [field, legacyUserValue(user, field)]),
-      ),
+      Object.fromEntries(PROFILE_FIELDS.map((field) => [field, legacyUserValue(user, field)])),
     );
     profile.uid = uid;
     profile.username = profile.username || user.username || user.userId || "";
@@ -294,12 +265,10 @@ export async function migrateAllUsersToCanonical({ db }) {
     };
   }
   if (Object.keys(updates).length) await db.ref().update(updates);
-  await db
-    .ref("system/canonicalSchemaVersion")
-    .set({
-      version: 4,
-      migratedAt: Date.now(),
-      users: Object.keys(users).length,
-    });
+  await db.ref("system/canonicalSchemaVersion").set({
+    version: 4,
+    migratedAt: Date.now(),
+    users: Object.keys(users).length,
+  });
   return { ok: true, users: Object.keys(users).length };
 }

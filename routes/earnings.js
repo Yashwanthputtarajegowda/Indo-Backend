@@ -113,8 +113,7 @@ export function createEarningsRouter({ db, requireUser }) {
       if (enabled && !summary.eligible) {
         return res.status(403).json({
           ok: false,
-          error:
-            "Earning is locked until both watch-hour requirements are completed.",
+          error: "Earning is locked until both watch-hour requirements are completed.",
           eligible: false,
           videoWatchHours: summary.videoWatchHours,
           reelWatchHours: summary.reelWatchHours,
@@ -153,8 +152,7 @@ export function createEarningsRouter({ db, requireUser }) {
       if (!mediaSnapshot.exists())
         return res.status(404).json({ ok: false, error: "Media not found." });
       const media = mediaSnapshot.val() || {};
-      if (media.ownerUid === user.uid)
-        return res.json({ ok: true, counted: false, seconds: 0 });
+      if (media.ownerUid === user.uid) return res.json({ ok: true, counted: false, seconds: 0 });
 
       const type = media.mediaType === "reel" ? "reel" : "video";
       const counterPath = `users/${media.ownerUid}/earnings/${type}WatchSeconds`;
@@ -162,9 +160,7 @@ export function createEarningsRouter({ db, requireUser }) {
       const counter = await db
         .ref(counterPath)
         .transaction((current) => asNumber(current) + seconds);
-      await db
-        .ref(viewerPath)
-        .transaction((current) => asNumber(current) + seconds);
+      await db.ref(viewerPath).transaction((current) => asNumber(current) + seconds);
       return res.json({
         ok: true,
         counted: true,

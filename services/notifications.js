@@ -8,8 +8,7 @@ export async function createNotification({
   text = "",
   targetId = "",
 }) {
-  if (!recipientUid || !type || !actorUid || actorUid === recipientUid)
-    return null;
+  if (!recipientUid || !type || !actorUid || actorUid === recipientUid) return null;
   const notificationRef = db.ref(`notifications/${recipientUid}`).push();
   const notification = {
     id: notificationRef.key,
@@ -27,9 +26,7 @@ export async function createNotification({
 }
 
 function normalizeNotifications(value) {
-  return Object.values(value || {}).filter(
-    (item) => item && typeof item === "object",
-  );
+  return Object.values(value || {}).filter((item) => item && typeof item === "object");
 }
 
 export async function listNotifications({ db, uid, limit = 50 }) {
@@ -41,9 +38,7 @@ export async function listNotifications({ db, uid, limit = 50 }) {
 
 export async function countUnreadNotifications({ db, uid }) {
   const snapshot = await db.ref(`notifications/${uid}`).get();
-  return normalizeNotifications(snapshot.val()).filter(
-    (item) => item.read !== true,
-  ).length;
+  return normalizeNotifications(snapshot.val()).filter((item) => item.read !== true).length;
 }
 
 export async function markNotificationRead({ db, uid, notificationId }) {

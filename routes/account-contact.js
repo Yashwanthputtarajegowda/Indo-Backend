@@ -6,9 +6,7 @@ import {
 
 function publicProfile(profile = {}) {
   const canonical =
-    profile.profile && typeof profile.profile === "object"
-      ? profile.profile
-      : profile;
+    profile.profile && typeof profile.profile === "object" ? profile.profile : profile;
   const source = { ...profile, ...canonical };
   return {
     uid: source.uid || "",
@@ -19,12 +17,8 @@ function publicProfile(profile = {}) {
     avatarUrl: source.avatarUrl || source.photoURL || source.photoUrl || "",
     photoURL: source.photoURL || source.avatarUrl || source.photoUrl || "",
     accountType: source.accountType === "private" ? "private" : "public",
-    followersCount: Number(
-      source.followersCount || source.stats?.followersCount || 0,
-    ),
-    followingCount: Number(
-      source.followingCount || source.stats?.followingCount || 0,
-    ),
+    followersCount: Number(source.followersCount || source.stats?.followersCount || 0),
+    followingCount: Number(source.followingCount || source.stats?.followingCount || 0),
     postsCount: Number(source.postsCount || source.stats?.postsCount || 0),
   };
 }
@@ -48,8 +42,7 @@ function validateAvatarData(value) {
   if (!data) return "";
   if (!/^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(data))
     throw new Error("Invalid profile photo.");
-  if (data.length > 7 * 1024 * 1024)
-    throw new Error("Profile photo is too large.");
+  if (data.length > 7 * 1024 * 1024) throw new Error("Profile photo is too large.");
   return data;
 }
 async function uploadProfileAvatar({ uid, data }) {
@@ -90,12 +83,10 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const name = clean(req.body?.name, 80);
     const bio = clean(req.body?.bio, 160);
     const location = clean(req.body?.location, 100);
@@ -103,12 +94,8 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
     const role = clean(req.body?.role, 60);
     const interests = clean(req.body?.interests, 240);
     const language = clean(req.body?.language, 40);
-    const visibility =
-      req.body?.visibility === "private" ? "private" : "public";
-    if (!name)
-      return res
-        .status(400)
-        .json({ ok: false, error: "User Name is required." });
+    const visibility = req.body?.visibility === "private" ? "private" : "public";
+    if (!name) return res.status(400).json({ ok: false, error: "User Name is required." });
     try {
       const userRef = db.ref(`users/${user.uid}`);
       const snapshot = await userRef.get();
@@ -134,11 +121,7 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
         ...previousProfile,
         uid: user.uid,
         userId: previousProfile.userId || previous.userId || "",
-        username:
-          previousProfile.username ||
-          previous.username ||
-          previous.userId ||
-          "",
+        username: previousProfile.username || previous.username || previous.userId || "",
         name,
         displayName: name,
         bio,
@@ -171,12 +154,10 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
       return res.json({ ok: true, profile: publicProfile(profile) });
     } catch (error) {
       console.error("Profile update failed:", error);
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not update profile.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not update profile.",
+      });
     }
   });
 
@@ -184,28 +165,19 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const mobile = String(req.body?.mobile || "").trim();
     const email = String(req.body?.email || user.email || "")
       .trim()
       .toLowerCase();
-    if (!mobile)
-      return res
-        .status(400)
-        .json({ ok: false, error: "Mobile number is required." });
+    if (!mobile) return res.status(400).json({ ok: false, error: "Mobile number is required." });
     if (!/^\+?[0-9 ()-]{7,20}$/.test(mobile))
-      return res
-        .status(400)
-        .json({ ok: false, error: "Invalid mobile number." });
+      return res.status(400).json({ ok: false, error: "Invalid mobile number." });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      return res
-        .status(400)
-        .json({ ok: false, error: "Invalid email address." });
+      return res.status(400).json({ ok: false, error: "Invalid email address." });
     try {
       const userRef = db.ref(`users/${user.uid}`);
       const snapshot = await userRef.get();
@@ -214,12 +186,10 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
       await userRef.update({ mobile, email, contactUpdatedAt: Date.now() });
       return res.json({ ok: true, mobile, email });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not save contact details.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not save contact details.",
+      });
     }
   });
 
@@ -227,15 +197,12 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
     const viewer = await requireUser(req, res);
     if (!viewer) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const uid = String(req.params.uid || "").trim();
-    if (!uid)
-      return res.status(400).json({ ok: false, error: "User ID is required." });
+    if (!uid) return res.status(400).json({ ok: false, error: "User ID is required." });
     try {
       const snapshot = await db.ref(`users/${uid}`).get();
       if (!snapshot.exists())
@@ -245,9 +212,7 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
         profile: publicProfile(snapshot.val() || {}),
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ ok: false, error: error.message || "Could not load profile." });
+      return res.status(500).json({ ok: false, error: error.message || "Could not load profile." });
     }
   });
 
@@ -255,31 +220,22 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const targetUid = clean(req.params.targetUid, 160);
     if (!targetUid || targetUid === user.uid)
-      return res
-        .status(400)
-        .json({ ok: false, error: "Valid recipient is required." });
+      return res.status(400).json({ ok: false, error: "Valid recipient is required." });
     try {
       const targetSnapshot = await db.ref(`users/${targetUid}`).get();
       if (!targetSnapshot.exists())
-        return res
-          .status(404)
-          .json({ ok: false, error: "Recipient profile not found." });
+        return res.status(404).json({ ok: false, error: "Recipient profile not found." });
       if (await isBlockedEitherWay(db, user.uid, targetUid))
-        return res
-          .status(403)
-          .json({
-            ok: false,
-            error:
-              "Messaging is unavailable because one account has blocked the other.",
-          });
+        return res.status(403).json({
+          ok: false,
+          error: "Messaging is unavailable because one account has blocked the other.",
+        });
       const key = [user.uid, targetUid].sort().join("_");
       const snapshot = await db.ref(`messages/${key}`).limitToLast(100).get();
       const messages = Object.values(snapshot.val() || {}).sort(
@@ -291,12 +247,10 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
         recipient: publicProfile(targetSnapshot.val() || {}),
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not load messages.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not load messages.",
+      });
     }
   });
 
@@ -304,39 +258,27 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const targetUid = clean(req.params.targetUid, 160);
     const text = clean(req.body?.text, 1000);
     if (!targetUid || targetUid === user.uid)
-      return res
-        .status(400)
-        .json({ ok: false, error: "Valid recipient is required." });
-    if (!text)
-      return res
-        .status(400)
-        .json({ ok: false, error: "Message cannot be empty." });
+      return res.status(400).json({ ok: false, error: "Valid recipient is required." });
+    if (!text) return res.status(400).json({ ok: false, error: "Message cannot be empty." });
     try {
       const [senderSnapshot, targetSnapshot] = await Promise.all([
         db.ref(`users/${user.uid}`).get(),
         db.ref(`users/${targetUid}`).get(),
       ]);
       if (!targetSnapshot.exists())
-        return res
-          .status(404)
-          .json({ ok: false, error: "Recipient profile not found." });
+        return res.status(404).json({ ok: false, error: "Recipient profile not found." });
       if (await isBlockedEitherWay(db, user.uid, targetUid))
-        return res
-          .status(403)
-          .json({
-            ok: false,
-            error:
-              "Messaging is unavailable because one account has blocked the other.",
-          });
+        return res.status(403).json({
+          ok: false,
+          error: "Messaging is unavailable because one account has blocked the other.",
+        });
       const sender = senderSnapshot.val() || {};
       const key = [user.uid, targetUid].sort().join("_");
       const ref = db.ref(`messages/${key}`).push();
@@ -365,35 +307,29 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
           recipient.photoURL ||
           "",
       );
-      await db
-        .ref(`messageInbox/${targetUid}/${key}`)
-        .set({
-          conversationId: key,
-          otherUid: user.uid,
-          otherUserId: sender.username || `@${user.uid.slice(0, 8)}`,
-          otherName: sender.name || "Indo User",
-          otherAvatarUrl: senderAvatar,
-          lastMessage: text,
-          updatedAt: message.createdAt,
-          unread: true,
-        });
-      await db
-        .ref(`messageInbox/${user.uid}/${key}`)
-        .set({
-          conversationId: key,
-          otherUid: targetUid,
-          otherUserId: recipient.username || `@${targetUid.slice(0, 8)}`,
-          otherName: recipient.name || "Indo User",
-          otherAvatarUrl: recipientAvatar,
-          lastMessage: text,
-          updatedAt: message.createdAt,
-          unread: false,
-        });
+      await db.ref(`messageInbox/${targetUid}/${key}`).set({
+        conversationId: key,
+        otherUid: user.uid,
+        otherUserId: sender.username || `@${user.uid.slice(0, 8)}`,
+        otherName: sender.name || "Indo User",
+        otherAvatarUrl: senderAvatar,
+        lastMessage: text,
+        updatedAt: message.createdAt,
+        unread: true,
+      });
+      await db.ref(`messageInbox/${user.uid}/${key}`).set({
+        conversationId: key,
+        otherUid: targetUid,
+        otherUserId: recipient.username || `@${targetUid.slice(0, 8)}`,
+        otherName: recipient.name || "Indo User",
+        otherAvatarUrl: recipientAvatar,
+        lastMessage: text,
+        updatedAt: message.createdAt,
+        unread: false,
+      });
       return res.status(201).json({ ok: true, message });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ ok: false, error: error.message || "Could not send message." });
+      return res.status(500).json({ ok: false, error: error.message || "Could not send message." });
     }
   });
 
@@ -401,17 +337,13 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const targetUid = clean(req.params.targetUid, 160);
     if (!targetUid || targetUid === user.uid)
-      return res
-        .status(400)
-        .json({ ok: false, error: "Valid recipient is required." });
+      return res.status(400).json({ ok: false, error: "Valid recipient is required." });
     try {
       const key = [user.uid, targetUid].sort().join("_");
       const snapshot = await db.ref(`messages/${key}`).limitToLast(100).get();
@@ -424,12 +356,10 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
       await db.ref(`messageInbox/${user.uid}/${key}/unread`).set(false);
       return res.json({ ok: true });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not mark messages read.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not mark messages read.",
+      });
     }
   });
 
@@ -437,12 +367,10 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     try {
       const snapshot = await db.ref(`messageInbox/${user.uid}`).get();
       const conversations = Object.values(snapshot.val() || {}).sort(
@@ -450,12 +378,10 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
       );
       return res.json({ ok: true, conversations });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not load conversations.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not load conversations.",
+      });
     }
   });
 
