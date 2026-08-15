@@ -47,6 +47,32 @@ export async function mirrorVideoFromUrl({ mediaUrl, caption = "", fileName = "i
   };
 }
 
+export async function mirrorVideoBuffer({ buffer, caption = "", fileName = "indo-video.mp4" }) {
+  if (!telegramStorageConfigured()) {
+    throw new Error("Telegram storage is not configured.");
+  }
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    throw new Error("Video file is empty.");
+  }
+
+  const form = new FormData();
+  form.set("chat_id", CHAT_ID());
+  form.set("video", new Blob([buffer], { type: "video/mp4" }), String(fileName || "indo-video.mp4"));
+  if (caption) form.set("caption", String(caption).slice(0, 1024));
+  const message = await telegramCall("sendVideo", form);
+  const video = message?.video;
+  if (!video?.file_id) {
+    throw new Error("Telegram did not return a video file_id.");
+  }
+  return {
+    storage: "telegram",
+    fileId: String(video.file_id),
+    fileUniqueId: String(video.file_unique_id || ""),
+    messageId: Number(message.message_id || 0),
+    fileName: String(fileName || "indo-video.mp4"),
+  };
+}
+
 export async function mirrorPhotoFromUrl({ mediaUrl, caption = "" }) {
   const message = await sendByUrl("sendPhoto", "photo", mediaUrl, caption);
   const photos = Array.isArray(message?.photo) ? message.photo : [];
