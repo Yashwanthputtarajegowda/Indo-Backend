@@ -70,6 +70,23 @@ function validUid(uid) {
   return /^[A-Za-z0-9_-]{1,128}$/.test(uid);
 }
 
+function isSafeText(value, max) {
+  const text = String(value ?? "");
+  if (text.length > max) return false;
+  return !/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text);
+}
+
+function isHttpsUrl(value, max = 1200) {
+  const raw = String(value || "").trim();
+  if (!raw) return true;
+  if (raw.length > max || /[\u0000-\u001F\u007F]/.test(raw)) return false;
+  try {
+    return new URL(raw).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 async function verifyBearer(req) {
   if (!auth) return null;
   const header = String(req.headers.authorization || "");
@@ -219,55 +236,6 @@ express.application.post = function securePost(path, ...handlers) {
       } catch {
         return res.status(401).json({ ok: false, error: "Invalid or expired authentication token." });
       }
-
-      const originalJson = res.json.bind(res);
-      res.json = (payload) => {
-        try {
-          const kind = String(req.body?.kind || "video").trim().toLowerCase();
-          if (!payload?.ok || !payload?.signature || !payload?.timestamp || !payload?.folder)
-            return originalJson(payload);
-
-          if (kind !== "video" && kind !== "story")
-            return originalJson({ ok: false, error: "Invalid media type." });
-
-          const isStory = kind === "story";
-          const resourceType = isStory ? "image" : "video";
-          const expectedFolder = isStory
-            ? `indo/stories/${user.uid}`
-            : `indo/videos/${user.uid}`;
-          const allowedFormats = isStory
-            ? "jpg,jpeg,png,webp"
-            : "mp4,mov,webm";
-          const maxFileSize = isStory
-            ? 10 * 1024 * 1024
-            : 100 * 1024 * 1024;
-
-          if (payload.folder !== expectedFolder)
-            return originalJson({ ok: false, error: "Invalid upload policy." });
-
-          const timestamp = Number(payload.timestamp);
-          if (!Number.isInteger(timestamp) || Math.abs(Math.floor(Date.now() / 1000) - timestamp) > 300)
-            return originalJson({ ok: false, error: "Upload signature expired." });
-
-          const signature = createCloudinarySignature(timestamp, {
-            folder: expectedFolder,
-            resource_type: resourceType,
-            allowed_formats: allowedFormats,
-            max_file_size: maxFileSize,
-          });
-
-          return originalJson({
-            ...payload,
-            resourceType,
-            allowedFormats,
-            maxFileSize,
-            signature,
-          });
-        } catch {
-          return originalJson({ ok: false, error: "Upload policy could not be issued." });
-        }
-      };
-
       req.securityUser = user;
       return next();
     };
@@ -275,6 +243,26 @@ express.application.post = function securePost(path, ...handlers) {
   }
 
   return originalPost.call(this, path, ...handlers);
+};
+
+const originalPatch = express.application.patch;
+express.application.patch = function securePatch(path, ...handlers) {
+  if (path === "/api/account/profile") {
+    const guard = (req, res, next) => {
+      const body = req.body || {};
+      if (!isSafeText(body.name, 80) || !isSafeText(body.bio, 160) || !isSafeText(body.location, 100) ||
+          !isSafeText(body.role, 60) || !isSafeText(body.interests, 240) || !isSafeText(body.language, 40)) {
+        return res.status(400).json({ ok: false, error: "Profile contains invalid characters or is too long." });
+      }
+      if (!isHttpsUrl(body.website, 1200))
+        return res.status(400).json({ ok: false, error: "Invalid website URL." });
+      if (body.avatarUrl && !isHttpsUrl(body.avatarUrl, 1200))
+        return res.status(400).json({ ok: false, error: "Invalid profile photo URL." });
+      return next();
+    };
+    return originalPatch.call(this, path, guard, ...handlers);
+  }
+  return originalPatch.call(this, path, ...handlers);
 };
 
 const originalGet = express.application.get;
