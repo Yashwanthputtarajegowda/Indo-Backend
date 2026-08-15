@@ -25,23 +25,20 @@ export async function createNotification({
   return notification;
 }
 
+function normalizeNotifications(value) {
+  return Object.values(value || {}).filter((item) => item && typeof item === "object");
+}
+
 export async function listNotifications({ db, uid, limit = 50 }) {
-  const snapshot = await db
-    .ref(`notifications/${uid}`)
-    .limitToLast(Math.min(100, Math.max(1, limit)))
-    .get();
-  return Object.values(snapshot.val() || {}).sort(
-    (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0),
-  );
+  const snapshot = await db.ref(`notifications/${uid}`).get();
+  return normalizeNotifications(snapshot.val())
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+    .slice(0, Math.min(100, Math.max(1, limit)));
 }
 
 export async function countUnreadNotifications({ db, uid }) {
-  const snapshot = await db
-    .ref(`notifications/${uid}`)
-    .orderByChild("read")
-    .equalTo(false)
-    .get();
-  return Object.keys(snapshot.val() || {}).length;
+  const snapshot = await db.ref(`notifications/${uid}`).get();
+  return normalizeNotifications(snapshot.val()).filter((item) => item.read !== true).length;
 }
 
 export async function markNotificationRead({ db, uid, notificationId }) {
@@ -54,10 +51,12 @@ export async function markNotificationRead({ db, uid, notificationId }) {
 
 export async function markAllNotificationsRead({ db, uid }) {
   const ref = db.ref(`notifications/${uid}`);
-  const snapshot = await ref.orderByChild("read").equalTo(false).get();
-  const unread = snapshot.val() || {};
+  const snapshot = await ref.get();
+  const all = snapshot.val() || {};
   const updates = {};
-  for (const id of Object.keys(unread)) updates[`${id}/read`] = true;
+  for (const [id, item] of Object.entries(all)) {
+    if (item && item.read !== true) updates[`${id}/read`] = true;
+  }
   if (Object.keys(updates).length) await ref.update(updates);
   return Object.keys(updates).length;
 }
