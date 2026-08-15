@@ -27,3 +27,38 @@ jobs:
           printf '%s\n' "$response"
           printf '%s\n' "$response" | grep -iq '^access-control-allow-origin: https://yashwanthputtarajegowda.github.io$'
           printf '%s\n' "$response" | grep -iq '^access-control-allow-methods:'
+
+      - name: Protected media signature rejects anonymous access
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            --data '{"kind":"video"}' \
+            https://indo-backend-production-41b1.up.railway.app/api/media/signature)
+          test "$status" = "401"
+
+      - name: Legacy video view rejects anonymous access
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' \
+            -X POST \
+            https://indo-backend-production-41b1.up.railway.app/api/media/videos/test/view)
+          test "$status" = "401"
+
+      - name: Account contact rejects anonymous access
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' \
+            -X PATCH \
+            -H 'Content-Type: application/json' \
+            --data '{"mobile":"9999999999","email":"test@example.com"}' \
+            https://indo-backend-production-41b1.up.railway.app/api/account/contact)
+          test "$status" = "401"
+
+      - name: Private-profile route rejects malformed identifiers safely
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' \
+            https://indo-backend-production-41b1.up.railway.app/api/account/public-profile/%2e%2e)
+          test "$status" = "400"
