@@ -1,27 +1,25 @@
 import crypto from "node:crypto";
 
 const ALLOWED_MEDIA_PREFIXES = ["indo/videos/", "indo/stories/"];
+const SAFE_PUBLIC_ID = /^[A-Za-z0-9_./-]{1,500}$/;
 
 function normalizePublicId(value) {
   return String(value || "").trim().replace(/^\/+/, "");
 }
 
 function isAllowedMediaPublicId(publicId) {
+  if (!SAFE_PUBLIC_ID.test(publicId)) return false;
+  if (publicId.includes("..") || publicId.includes("\\")) return false;
+  if (/%2f|%5c|%2e/i.test(publicId)) return false;
   return ALLOWED_MEDIA_PREFIXES.some((prefix) => publicId.startsWith(prefix));
 }
 
-export function createCloudinarySignature(
-  timestamp,
-  params = {},
-) {
+export function createCloudinarySignature(timestamp, params = {}) {
   const apiSecret = process.env.CLOUDINARY_API_SECRET;
   if (!apiSecret)
     throw new Error("Cloudinary API secret is not configured.");
 
-  const payload = Object.entries({
-    ...params,
-    timestamp,
-  })
+  const payload = Object.entries({ ...params, timestamp })
     .filter(([, value]) => value !== undefined && value !== null && value !== "")
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `${key}=${value}`)
@@ -46,7 +44,6 @@ export async function destroyCloudinaryVideo(publicId) {
   if (!id) return { result: "skipped" };
 
   // Never allow the backend delete endpoint to target arbitrary Cloudinary assets.
-  // Indo media must live under one of the application-owned namespaces.
   if (!isAllowedMediaPublicId(id)) {
     throw new Error("Cloudinary asset is outside the Indo media namespace.");
   }
@@ -86,12 +83,11 @@ export async function destroyCloudinaryVideo(publicId) {
 
 export async function cloudinaryAssetExists(publicId) {
   const id = normalizePublicId(publicId);
-  if (!id) return false;
-  if (!isAllowedMediaPublicId(id)) return false;
+  if (!id || !isAllowedMediaPublicId(id)) return false;
   const { cloudName, apiKey } = getCloudinaryConfig();
-  const token = Buffer.from(
-    `${apiKey}:${process.env.CLOUDINARY_API_SECRET || ""}`,
-  ).toString("base64");
+  const apiSecret = process.env.CLOUDINARY_API_SECRET;
+  if (!apiSecret) throw new Error("Cloudinary API secret is not configured.");
+  const token = Buffer.from(`${apiKey}:${apiSecret}`).toString("base64");
   const response = await fetch(
     `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/resources/video/upload/${encodeURIComponent(id)}`,
     { headers: { Authorization: `Basic ${token}` } },
