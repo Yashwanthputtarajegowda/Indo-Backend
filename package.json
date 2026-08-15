@@ -1,13 +1,14 @@
 {
   "name": "indo-backend",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node --import ./security-bootstrap.mjs --import ./security-router-guard.mjs --import ./security-csrf.mjs --import ./security-rate-limit.mjs --import ./security-headers.mjs --import ./security-error-guard.mjs --import ./security-account-reauth.mjs --import ./security-abuse.mjs --import ./security-read-guards.mjs --import ./telegram-storage-bootstrap.mjs --import ./telegram-direct-upload.mjs server.js",
     "preflight:production": "node scripts/production-preflight.mjs",
     "security:smoke": "node scripts/security-smoke-test.mjs",
-    "migrate:telegram": "node scripts/migrate-cloudinary-to-telegram.mjs"
+    "migrate:telegram": "node scripts/migrate-cloudinary-to-telegram.mjs",
+    "backfill:telegram-urls": "node scripts/backfill-telegram-stream-urls.mjs"
   },
   "dependencies": {
     "busboy": "^1.6.0",
