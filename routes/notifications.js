@@ -6,6 +6,16 @@ import {
   markAllNotificationsRead,
 } from "../services/notifications.js";
 
+const REPORT_REASONS = new Set([
+  "spam",
+  "harassment",
+  "hate",
+  "violence",
+  "sexual",
+  "copyright",
+  "other",
+]);
+
 export function createNotificationsRouter({
   db,
   requireUser,
@@ -159,6 +169,108 @@ export function createNotificationsRouter({
           error:
             error?.message ||
             "Could not mark notifications as read.",
+        });
+      }
+    },
+  );
+
+  router.post(
+    "/reports",
+    async (req, res) => {
+      const user = await requireUser(req, res);
+      if (!user) return;
+
+      if (!db) {
+        return res.status(503).json({
+          ok: false,
+          error: "Service unavailable.",
+        });
+      }
+
+      const videoId = String(
+        req.body?.videoId || "",
+      ).trim();
+      const reason = String(
+        req.body?.reason || "",
+      ).trim().toLowerCase();
+      const details = String(
+        req.body?.details || "",
+      )
+        .trim()
+        .slice(0, 500);
+
+      if (!videoId) {
+        return res.status(400).json({
+          ok: false,
+          error: "Video ID is required.",
+        });
+      }
+
+      if (!REPORT_REASONS.has(reason)) {
+        return res.status(400).json({
+          ok: false,
+          error: "Invalid report reason.",
+        });
+      }
+
+      try {
+        const videoSnapshot = await db
+          .ref("videos")
+          .child(videoId)
+          .get();
+
+        if (!videoSnapshot.exists()) {
+          return res.status(404).json({
+            ok: false,
+            error: "Video not found.",
+          });
+        }
+
+        const video = videoSnapshot.val() || {};
+        const indexRef = db
+          .ref("videoReportIndex")
+          .child(videoId)
+          .child(user.uid);
+        const existing = await indexRef.get();
+
+        if (existing.exists()) {
+          return res.json({
+            ok: true,
+            alreadyReported: true,
+            message: "You already reported this video.",
+          });
+        }
+
+        const reportRef = db.ref("reports").push();
+        const report = {
+          id: reportRef.key,
+          videoId,
+          reporterUid: user.uid,
+          ownerUid: String(
+            video.ownerUid || "",
+          ),
+          reason,
+          details,
+          status: "open",
+          createdAt: Date.now(),
+        };
+
+        await db.ref().update({
+          [`reports/${reportRef.key}`]: report,
+          [`videoReportIndex/${videoId}/${user.uid}`]:
+            reportRef.key,
+        });
+
+        return res.status(201).json({
+          ok: true,
+          alreadyReported: false,
+          reportId: reportRef.key,
+        });
+      } catch (error) {
+        console.error("Video report failed:", error);
+        return res.status(500).json({
+          ok: false,
+          error: "Could not submit the report.",
         });
       }
     },
