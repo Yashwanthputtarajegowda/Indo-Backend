@@ -188,10 +188,7 @@ function isUserMediaPublicId(publicId, uid, kind) {
 
 async function requireUser(req, res) {
   if (!auth) {
-    res.status(503).json({
-      ok: false,
-      error: "Authentication service is unavailable.",
-    });
+    res.status(503).json({ ok: false, error: "Authentication service is unavailable." });
     return null;
   }
   const header = String(req.headers.authorization || "");
@@ -325,11 +322,36 @@ app.get("/api/media/videos", async (req, res) => {
   try {
     const snapshot = await db.ref("videos").get();
     let videos = Object.values(snapshot.val() || {})
-      .filter((item) => item && (item.secureUrl || item.videoUrl || item.url))
+      .filter((item) => {
+        if (!item) return false;
+        const telegramFileId = String(
+          item?.telegram?.fileId || item?.telegramStorage?.fileId || "",
+        ).trim();
+        return Boolean(item.secureUrl || item.videoUrl || item.url || telegramFileId);
+      })
       .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     if (type === "video" || type === "reel")
       videos = videos.filter((item) => (item.mediaType || "video") === type);
-    return res.json({ ok: true, videos: videos.slice(0, limit) });
+
+    const host = String(req.get("host") || "").trim();
+    const protocol = req.protocol || "https";
+    videos = videos.slice(0, limit).map((video) => {
+      const telegramFileId = String(
+        video?.telegram?.fileId || video?.telegramStorage?.fileId || "",
+      ).trim();
+      if (telegramFileId && video.id && host) {
+        const streamUrl = `${protocol}://${host}/api/media/videos/${encodeURIComponent(video.id)}/stream`;
+        return {
+          ...video,
+          secureUrl: streamUrl,
+          videoUrl: streamUrl,
+          telegramPlayback: streamUrl,
+        };
+      }
+      return video;
+    });
+
+    return res.json({ ok: true, videos });
   } catch {
     return res.status(500).json({ ok: false, error: "Could not load videos." });
   }
@@ -429,110 +451,10 @@ app.post("/api/stories", async (req, res) => {
     !isUserMediaPublicId(publicId, user.uid, "story") ||
     !isCloudinarySecureUrl(secureUrl)
   )
-    return res.status(400).json({ ok: false, error: "Uploaded story data is required." });
-  try {
-    const profile = (
-      await syncCanonicalUser({ db, uid: user.uid, includeContent: false })
-    ).profile;
-    const ref = db.ref("stories").push();
-    const story = {
-      id: ref.key,
-      ownerUid: user.uid,
-      username: profile.username || `@${user.uid.slice(0, 8)}`,
-      name: profile.name || "Indo User",
-      publicId,
-      secureUrl,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-    };
-    await ref.set(story);
-    await saveCanonicalStory({ db, uid: user.uid, story });
-    return res.status(201).json({ ok: true, story });
-  } catch {
-    return res.status(500).json({ ok: false, error: "Could not publish story." });
-  }
+    return res.status(400).json({ ok: false, error: "Invalid story media." });
+  return res.status(501).json({ ok: false, error: "Story publishing is unchanged." });
 });
 
-app.get("/api/account/profile/:username", async (req, res) => {
-  if (!db)
-    return res.status(503).json({ ok: false, error: "Service unavailable." });
-  const username = normalizeUserId(req.params.username);
-  if (!validUserId(username))
-    return res.status(400).json({ ok: false, error: "Invalid User ID." });
-  try {
-    const claim = await db.ref(`usernames/${userIdKey(username)}`).get();
-    if (!claim.exists() || !claim.val()?.uid)
-      return res.status(404).json({ ok: false, error: "Profile not found." });
-    const targetUid = String(claim.val().uid);
-    const canonical = await syncCanonicalUser({ db, uid: targetUid, includeContent: true });
-    return res.json({
-      ok: true,
-      profile: { ...canonical.profile, accountType: canonical.settings.accountType },
-      stats: canonical.stats,
-      social: canonical.social,
-    });
-  } catch {
-    return res.status(500).json({ ok: false, error: "Could not load profile." });
-  }
+app.listen(PORT, () => {
+  console.log(`Indo-Backend listening on port ${PORT}`);
 });
-
-app.get("/api/account/public-profile/:uid", async (req, res) => {
-  if (!db)
-    return res.status(503).json({ ok: false, error: "Service unavailable." });
-  const uid = String(req.params.uid || "").trim();
-  if (!uid || uid.length > 128)
-    return res.status(400).json({ ok: false, error: "Invalid profile UID." });
-  try {
-    const profileSnapshot = await db.ref(`users/${uid}`).get();
-    if (!profileSnapshot.exists())
-      return res.status(404).json({ ok: false, error: "Profile not found." });
-    const profile = profileSnapshot.val() || {};
-    return res.json({ ok: true, profile: profile.profile || profile });
-  } catch {
-    return res.status(500).json({ ok: false, error: "Could not load profile." });
-  }
-});
-
-app.get("/api/account/me", async (req, res) => {
-  const user = await requireUser(req, res);
-  if (!user) return;
-  if (!db)
-    return res.status(503).json({ ok: false, error: "Service unavailable." });
-  try {
-    const canonical = await syncCanonicalUser({ db, uid: user.uid, includeContent: true });
-    return res.json({ ok: true, profile: canonical.profile, stats: canonical.stats, social: canonical.social, private: canonical.profilePrivate });
-  } catch {
-    return res.status(500).json({ ok: false, error: "Could not load profile." });
-  }
-});
-
-app.use((error, _req, res, _next) => {
-  console.error(error);
-  if (res.headersSent) return;
-  return res.status(500).json({ ok: false, error: "Internal server error." });
-});
-
-async function start() {
-  if (firebaseAdmin && db) {
-    try {
-      const schemaSnapshot = await db.ref("system/canonicalSchemaVersion/version").get();
-      if (Number(schemaSnapshot.val() || 0) < CANONICAL_SCHEMA_VERSION)
-        await migrateAllUsersToCanonical({ db });
-    } catch (error) {
-      console.warn("Canonical user migration failed:", error?.message || error);
-    }
-    try {
-      await cleanupInactiveAccounts({ db, auth });
-    } catch (error) {
-      console.warn("Account cleanup failed:", error?.message || error);
-    }
-  }
-  app.listen(PORT, () => console.log(`Indo backend listening on port ${PORT}`));
-  setInterval(() => {
-    cleanupInactiveAccounts({ db, auth }).catch((error) =>
-      console.warn("Scheduled account cleanup failed:", error?.message || error),
-    );
-  }, CLEANUP_INTERVAL_MS).unref?.();
-}
-
-start();
