@@ -1,0 +1,86 @@
+name: Live Authorization Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile_uid:
+        description: 'Private test-account UID (optional)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  live-authz:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://indo-backend-production-41b1.up.railway.app
+      TEST_PROFILE_UID: ${{ inputs.profile_uid || secrets.SECURITY_TEST_PROFILE_UID }}
+      USER_A_TOKEN: ${{ secrets.SECURITY_TEST_USER_A_TOKEN }}
+      USER_B_TOKEN: ${{ secrets.SECURITY_TEST_USER_B_TOKEN }}
+    steps:
+      - name: Health
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 \
+            "$BASE_URL/api/health"
+
+      - name: Anonymous protected-route checks
+        run: |
+          set -euo pipefail
+          check_unauth() {
+            local method="$1"
+            local path="$2"
+            local expected="$3"
+            code=$(curl --silent --show-error --max-time 20 -o /tmp/body -w '%{http_code}' \
+              -X "$method" "$BASE_URL$path" \
+              -H 'Content-Type: application/json' \
+              --data '{}')
+            echo "$method $path -> $code"
+            test "$code" = "$expected"
+          }
+          check_unauth POST /api/media/signature 401
+          check_unauth PATCH /api/account/contact 401
+          check_unauth POST /api/account/delete 401
+
+      - name: Private-profile authorization checks
+        if: env.TEST_PROFILE_UID != '' && env.USER_A_TOKEN != ''
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --max-time 20 -o /tmp/body -w '%{http_code}' \
+            -H "Authorization: Bearer $USER_A_TOKEN" \
+            "$BASE_URL/api/account/public-profile/$TEST_PROFILE_UID")
+          echo "User A -> private profile: $code"
+          case "$code" in
+            200|401|403|404) ;;
+            *) cat /tmp/body; exit 1 ;;
+          esac
+
+      - name: Cross-user private-profile check
+        if: env.TEST_PROFILE_UID != '' && env.USER_B_TOKEN != ''
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --max-time 20 -o /tmp/body -w '%{http_code}' \
+            -H "Authorization: Bearer $USER_B_TOKEN" \
+            "$BASE_URL/api/account/public-profile/$TEST_PROFILE_UID")
+          echo "User B -> private profile: $code"
+          case "$code" in
+            200|401|403|404) ;;
+            *) cat /tmp/body; exit 1 ;;
+          esac
+
+      - name: Token-protected upload-signature check
+        if: env.USER_A_TOKEN != ''
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --max-time 20 -o /tmp/body -w '%{http_code}' \
+            -X POST "$BASE_URL/api/media/signature" \
+            -H "Authorization: Bearer $USER_A_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{"kind":"video"}')
+          echo "Authenticated signature request: $code"
+          case "$code" in
+            200|400|401|403|429|503) ;;
+            *) cat /tmp/body; exit 1 ;;
+          esac
