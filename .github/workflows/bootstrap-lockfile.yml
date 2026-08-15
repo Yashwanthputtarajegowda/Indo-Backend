@@ -2,6 +2,11 @@ name: Bootstrap package lockfile
 
 on:
   workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "package.json"
+      - ".github/workflows/bootstrap-lockfile.yml"
 
 permissions:
   contents: write
@@ -20,19 +25,21 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Generate lockfile
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
-      - name: Create lockfile PR
+      - name: Create or update lockfile PR
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ ! -f package-lock.json ]; then
+          if [ ! -s package-lock.json ]; then
             echo "package-lock.json was not generated" >&2
             exit 1
           fi
+
           if git diff --quiet -- package-lock.json; then
             echo "package-lock.json is already up to date."
             exit 0
@@ -54,5 +61,5 @@ jobs:
               --title "chore: add npm lockfile" \
               --body "Generate and pin the npm dependency tree so npm ci and dependency audits are deterministic."
           else
-            echo "PR #$existing already exists."
+            echo "PR #$existing already exists; branch has been refreshed."
           fi
