@@ -67,9 +67,12 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
       const previous = snapshot.val() || {}; const previousProfile = previous.profile || {};
       let avatarUrl = String(previousProfile.avatarUrl || previousProfile.photoURL || previous.avatarUrl || previous.photoURL || "");
       if (req.body?.avatarData) avatarUrl = await uploadProfileAvatar({ uid: user.uid, data: req.body.avatarData });
+      if (req.body?.avatarUrl) avatarUrl = clean(req.body.avatarUrl, 1200);
       const now = Date.now();
       const profile = { ...previousProfile, uid: user.uid, userId: previousProfile.userId || previous.userId || "", username: previousProfile.username || previous.username || previous.userId || "", name, displayName: name, bio, location, website, role, interests, language, accountType: visibility, avatarUrl, photoURL: avatarUrl, updatedAt: now };
-      await userRef.update({ name, bio, location, website, role, interests, language, accountType: visibility, avatarUrl, photoURL: avatarUrl, profile, updatedAt: now, "profile/updatedAt": now });
+      // Use non-overlapping Firebase paths. Updating both `profile` and `profile/updatedAt`
+      // in the same multi-location update causes an ancestor/child conflict.
+      await userRef.update({ name, bio, location, website, role, interests, language, accountType: visibility, avatarUrl, photoURL: avatarUrl, profile, updatedAt: now });
       return res.json({ ok: true, profile: publicProfile(profile) });
     } catch (error) {
       console.error("Profile update failed:", error); return res.status(500).json({ ok: false, error: error.message || "Could not update profile." });
