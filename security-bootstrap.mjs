@@ -57,6 +57,10 @@ function validUsername(username) {
   return /^[a-z0-9._-]{1,50}$/.test(username);
 }
 
+function validUid(uid) {
+  return /^[A-Za-z0-9_-]{1,128}$/.test(uid);
+}
+
 async function verifyBearer(req) {
   if (!auth) return null;
   const header = String(req.headers.authorization || "");
@@ -67,6 +71,56 @@ async function verifyBearer(req) {
     return await auth.verifyIdToken(token, true);
   } catch {
     return null;
+  }
+}
+
+async function canViewPrivateProfile(targetUid, viewerUid) {
+  if (!db || !viewerUid) return false;
+  if (String(targetUid) === String(viewerUid)) return true;
+  const followingSnapshot = await db
+    .ref(`users/${targetUid}/followers/${viewerUid}`)
+    .get();
+  return followingSnapshot.exists();
+}
+
+async function protectPrivateProfileByUid(req, res, next) {
+  if (!db)
+    return res.status(503).json({ ok: false, error: "Service unavailable." });
+
+  const uid = String(req.params.uid || "").trim();
+  if (!validUid(uid))
+    return res.status(400).json({ ok: false, error: "Invalid profile UID." });
+
+  try {
+    const profileSnapshot = await db.ref(`users/${uid}`).get();
+    if (!profileSnapshot.exists())
+      return res.status(404).json({ ok: false, error: "Profile not found." });
+
+    const profile = profileSnapshot.val() || {};
+    const canonicalProfile =
+      profile.profile && typeof profile.profile === "object"
+        ? profile.profile
+        : profile;
+    const accountType =
+      canonicalProfile.accountType === "private" ||
+      profile.accountType === "private" ||
+      profile.settings?.accountType === "private"
+        ? "private"
+        : "public";
+
+    if (accountType !== "private") return next();
+
+    const viewer = await verifyBearer(req);
+    if (!viewer)
+      return res.status(401).json({ ok: false, error: "Authentication required for private profiles." });
+
+    if (!(await canViewPrivateProfile(uid, viewer.uid)))
+      return res.status(403).json({ ok: false, error: "Private profile content is not available." });
+
+    req.securityProfileViewer = viewer;
+    return next();
+  } catch {
+    return res.status(500).json({ ok: false, error: "Could not validate profile access." });
   }
 }
 
@@ -108,15 +162,7 @@ async function protectPrivatePublicProfile(req, res, next) {
     if (!viewer)
       return res.status(401).json({ ok: false, error: "Authentication required for private profiles." });
 
-    if (String(viewer.uid) === targetUid) {
-      req.securityProfileViewer = viewer;
-      return next();
-    }
-
-    const followingSnapshot = await db
-      .ref(`users/${targetUid}/followers/${viewer.uid}`)
-      .get();
-    if (!followingSnapshot.exists())
+    if (!(await canViewPrivateProfile(targetUid, viewer.uid)))
       return res.status(403).json({ ok: false, error: "Private profile content is not available." });
 
     req.securityProfileViewer = viewer;
@@ -154,6 +200,9 @@ const originalGet = express.application.get;
 express.application.get = function secureGet(path, ...handlers) {
   if (path === "/api/account/profile/:username") {
     return originalGet.call(this, path, protectPrivatePublicProfile, ...handlers);
+  }
+  if (path === "/api/account/public-profile/:uid") {
+    return originalGet.call(this, path, protectPrivateProfileByUid, ...handlers);
   }
   return originalGet.call(this, path, ...handlers);
 };
