@@ -2,7 +2,6 @@ import "dotenv/config";
 import express from "express";
 import admin from "firebase-admin";
 import { getDatabaseWithUrl } from "firebase-admin/database";
-import { Readable } from "node:stream";
 import {
   mirrorPhotoFromUrl,
   mirrorVideoFromUrl,
@@ -67,6 +66,8 @@ if (!enabled || !telegramStorageConfigured()) {
       this.__indoTelegramFeaturesInstalled = true;
 
       // Stream an existing Telegram-backed video through the backend.
+      // The upstream Telegram response is buffered so Range/Content-Range headers
+      // are preserved reliably through the Express response.
       originalUse.call(this, async (req, res, next) => {
         const match = String(req.path || "").match(/^\/api\/media\/videos\/([^/]+)\/stream$/);
         if (!match || !db) return next();
@@ -82,15 +83,19 @@ if (!enabled || !telegramStorageConfigured()) {
           if (!fileId) return next();
 
           const fileUrl = await getTelegramFileUrl(fileId);
-          const headers = {};
           const range = String(req.headers.range || "").trim();
-          if (range) headers.Range = range;
+          const upstream = await fetch(
+            fileUrl,
+            range ? { headers: { Range: range } } : undefined,
+          );
 
-          const upstream = await fetch(fileUrl, { headers });
-          if (!upstream.ok || !upstream.body) {
-            return res.status(upstream.status || 502).json({ ok: false, error: "Telegram media could not be streamed." });
+          if (!upstream.ok) {
+            return res
+              .status(upstream.status || 502)
+              .json({ ok: false, error: "Telegram media could not be streamed." });
           }
 
+          const body = Buffer.from(await upstream.arrayBuffer());
           res.status(upstream.status === 206 ? 206 : 200);
           res.setHeader("Accept-Ranges", "bytes");
           res.setHeader("Cache-Control", "private, max-age=30");
@@ -99,10 +104,15 @@ if (!enabled || !telegramStorageConfigured()) {
             const value = upstream.headers.get(headerName);
             if (value) res.setHeader(headerName, value);
           }
-          Readable.fromWeb(upstream.body).pipe(res);
+          return res.end(body);
         } catch (error) {
-          console.warn("Telegram video stream failed:", error?.message || error);
-          if (!res.headersSent) return res.status(502).json({ ok: false, error: "Telegram media could not be streamed." });
+          console.error("Telegram video stream failed:", error?.stack || error?.message || error);
+          if (!res.headersSent) {
+            return res.status(502).json({
+              ok: false,
+              error: "Telegram media could not be streamed.",
+            });
+          }
           res.destroy(error);
         }
       });
