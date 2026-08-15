@@ -1,5 +1,10 @@
 import express from "express";
-import { listNotifications, markNotificationRead } from "../services/notifications.js";
+import {
+  listNotifications,
+  countUnreadNotifications,
+  markNotificationRead,
+  markAllNotificationsRead,
+} from "../services/notifications.js";
 
 export function createNotificationsRouter({ db, requireUser }) {
   const router = express.Router();
@@ -17,6 +22,18 @@ export function createNotificationsRouter({ db, requireUser }) {
     }
   });
 
+  router.get("/notifications/unread-count", async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    try {
+      const count = await countUnreadNotifications({ db, uid: user.uid });
+      return res.json({ ok: true, unreadCount: count });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error?.message || "Could not load unread notification count." });
+    }
+  });
+
   router.post("/notifications/:notificationId/read", async (req, res) => {
     const user = await requireUser(req, res);
     if (!user) return;
@@ -28,6 +45,18 @@ export function createNotificationsRouter({ db, requireUser }) {
       return res.json({ ok: true, notificationId, read: true });
     } catch (error) {
       return res.status(500).json({ ok: false, error: error?.message || "Could not update notification." });
+    }
+  });
+
+  router.post("/notifications/read-all", async (req, res) => {
+    const user = await requireUser(req, res);
+    if (!user) return;
+    if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    try {
+      const markedRead = await markAllNotificationsRead({ db, uid: user.uid });
+      return res.json({ ok: true, markedRead, unreadCount: 0 });
+    } catch (error) {
+      return res.status(500).json({ ok: false, error: error?.message || "Could not mark notifications as read." });
     }
   });
 
