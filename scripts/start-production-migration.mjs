@@ -4,12 +4,23 @@ import { migrateAllUsersToCanonical } from "../services/user-canonical.js";
 
 function initFirebase() {
   if (admin.apps.length) return admin.app();
-  const projectId = process.env.FIREBASE_PROJECT_ID || "indo-174f0";
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  const projectId =
+    process.env.FIREBASE_PROJECT_ID ||
+    "indo-174f0";
+  const clientEmail =
+    process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey =
+    process.env.FIREBASE_PRIVATE_KEY?.replace(
+      /\\n/g,
+      "\n",
+    );
   if (!clientEmail || !privateKey) return null;
   return admin.initializeApp({
-    credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
+    credential: admin.credential.cert({
+      projectId,
+      clientEmail,
+      privateKey,
+    }),
     databaseURL:
       process.env.FIREBASE_DATABASE_URL ||
       "https://indo-174f0-default-rtdb.firebaseio.com",
@@ -24,15 +35,24 @@ if (app) {
     app,
   );
   const version = Number(
-    (await db.ref("system/canonicalSchemaVersion/version").get()).val() || 0,
+    (
+      await db
+        .ref(
+          "system/canonicalSchemaVersion/version",
+        )
+        .get()
+    ).val() || 0,
   );
   if (version < 3) {
-    const result = await migrateAllUsersToCanonical({ db });
+    const result =
+      await migrateAllUsersToCanonical({ db });
     console.log(
       `[canonical-migration] migrated ${result.users} users to version 3`,
     );
   } else {
-    console.log(`[canonical-migration] version ${version} already active`);
+    console.log(
+      `[canonical-migration] version ${version} already active`,
+    );
   }
 }
 

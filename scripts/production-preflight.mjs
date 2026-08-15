@@ -12,12 +12,18 @@ const required = [
 const missing = required.filter(
   (key) => !String(process.env[key] || "").trim(),
 );
-const cors = String(process.env.CORS_ORIGINS || "");
+const cors = String(
+  process.env.CORS_ORIGINS || "",
+);
 const localhostOnly =
   cors &&
   cors
     .split(",")
-    .every((origin) => /localhost|127\.0\.0\.1/.test(origin.trim()));
+    .every((origin) =>
+      /localhost|127\.0\.0\.1/.test(
+        origin.trim(),
+      ),
+    );
 
 if (missing.length) {
   console.error(
@@ -33,4 +39,6 @@ if (localhostOnly) {
   process.exit(1);
 }
 
-console.log("Production environment preflight passed.");
+console.log(
+  "Production environment preflight passed.",
+);

@@ -1,48 +1,82 @@
 import { createNotification } from "./notifications.js";
 import { canonicalFollowUpdate } from "./user-canonical.js";
 
-async function syncFollowCounts({ db, followerUid, targetUid }) {
-  const [followingSnapshot, followersSnapshot] = await Promise.all([
-    db.ref(`users/${followerUid}/following`).get(),
-    db.ref(`users/${targetUid}/followers`).get(),
-  ]);
-  const followingCount = followingSnapshot.exists()
-    ? Object.keys(followingSnapshot.val() || {}).length
-    : 0;
-  const followersCount = followersSnapshot.exists()
-    ? Object.keys(followersSnapshot.val() || {}).length
-    : 0;
+async function syncFollowCounts({
+  db,
+  followerUid,
+  targetUid,
+}) {
+  const [followingSnapshot, followersSnapshot] =
+    await Promise.all([
+      db
+        .ref(`users/${followerUid}/following`)
+        .get(),
+      db
+        .ref(`users/${targetUid}/followers`)
+        .get(),
+    ]);
+  const followingCount =
+    followingSnapshot.exists()
+      ? Object.keys(followingSnapshot.val() || {})
+          .length
+      : 0;
+  const followersCount =
+    followersSnapshot.exists()
+      ? Object.keys(followersSnapshot.val() || {})
+          .length
+      : 0;
   await db.ref().update({
-    [`users/${followerUid}/followingCount`]: followingCount,
-    [`users/${targetUid}/followersCount`]: followersCount,
-    [`users/${followerUid}/social/followingCount`]: followingCount,
-    [`users/${targetUid}/social/followersCount`]: followersCount,
+    [`users/${followerUid}/followingCount`]:
+      followingCount,
+    [`users/${targetUid}/followersCount`]:
+      followersCount,
+    [`users/${followerUid}/social/followingCount`]:
+      followingCount,
+    [`users/${targetUid}/social/followersCount`]:
+      followersCount,
   });
   return { followingCount, followersCount };
 }
 
-export async function toggleFollow({ db, followerUid, targetUid, follow }) {
-  if (!db) throw new Error("Firebase Admin is not configured on the backend.");
-  if (!followerUid || !targetUid) throw new Error("Both users are required.");
+export async function toggleFollow({
+  db,
+  followerUid,
+  targetUid,
+  follow,
+}) {
+  if (!db)
+    throw new Error(
+      "Firebase Admin is not configured on the backend.",
+    );
+  if (!followerUid || !targetUid)
+    throw new Error("Both users are required.");
   if (followerUid === targetUid)
-    throw new Error("You cannot follow your own account.");
+    throw new Error(
+      "You cannot follow your own account.",
+    );
 
-  const [followerSnapshot, targetSnapshot] = await Promise.all([
-    db.ref(`users/${followerUid}`).get(),
-    db.ref(`users/${targetUid}`).get(),
-  ]);
-  if (!targetSnapshot.exists()) throw new Error("Target profile not found.");
+  const [followerSnapshot, targetSnapshot] =
+    await Promise.all([
+      db.ref(`users/${followerUid}`).get(),
+      db.ref(`users/${targetUid}`).get(),
+    ]);
+  if (!targetSnapshot.exists())
+    throw new Error("Target profile not found.");
 
   const follower = followerSnapshot.val() || {};
   const target = targetSnapshot.val() || {};
   const followerEntry = {
     uid: followerUid,
-    userId: follower.username || `@${followerUid.slice(0, 8)}`,
+    userId:
+      follower.username ||
+      `@${followerUid.slice(0, 8)}`,
     name: follower.name || "Indo User",
   };
   const targetEntry = {
     uid: targetUid,
-    userId: target.username || `@${targetUid.slice(0, 8)}`,
+    userId:
+      target.username ||
+      `@${targetUid.slice(0, 8)}`,
     name: target.name || "Indo User",
   };
 
@@ -67,15 +101,27 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
   if (follow) {
     if (target.accountType === "private") {
       if (alreadyFollowing) {
-        const counts = await syncFollowCounts({ db, followerUid, targetUid });
-        return { following: true, pending: false, ...counts };
+        const counts = await syncFollowCounts({
+          db,
+          followerUid,
+          targetUid,
+        });
+        return {
+          following: true,
+          pending: false,
+          ...counts,
+        };
       }
       if (alreadyPending) {
         return {
           following: false,
           pending: true,
-          followingCount: Number(follower.followingCount || 0),
-          followersCount: Number(target.followersCount || 0),
+          followingCount: Number(
+            follower.followingCount || 0,
+          ),
+          followersCount: Number(
+            target.followersCount || 0,
+          ),
         };
       }
 
@@ -96,14 +142,26 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
       return {
         following: false,
         pending: true,
-        followingCount: Number(follower.followingCount || 0),
-        followersCount: Number(target.followersCount || 0),
+        followingCount: Number(
+          follower.followingCount || 0,
+        ),
+        followersCount: Number(
+          target.followersCount || 0,
+        ),
       };
     }
 
     if (alreadyFollowing) {
-      const counts = await syncFollowCounts({ db, followerUid, targetUid });
-      return { following: true, pending: false, ...counts };
+      const counts = await syncFollowCounts({
+        db,
+        followerUid,
+        targetUid,
+      });
+      return {
+        following: true,
+        pending: false,
+        ...counts,
+      };
     }
 
     await db.ref().update({
@@ -134,7 +192,11 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
     });
   }
 
-  const counts = await syncFollowCounts({ db, followerUid, targetUid });
+  const counts = await syncFollowCounts({
+    db,
+    followerUid,
+    targetUid,
+  });
   return {
     following: Boolean(follow),
     pending: false,
@@ -142,24 +204,36 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
   };
 }
 
-export async function getFollowStatus({ db, followerUid, targetUid }) {
+export async function getFollowStatus({
+  db,
+  followerUid,
+  targetUid,
+}) {
   if (!db || !followerUid || !targetUid)
     return { following: false, pending: false };
-  if (followerUid === targetUid) return { following: false, pending: false };
-  const [followerSnapshot, targetSnapshot] = await Promise.all([
-    db.ref(`users/${followerUid}`).get(),
-    db.ref(`users/${targetUid}`).get(),
-  ]);
+  if (followerUid === targetUid)
+    return { following: false, pending: false };
+  const [followerSnapshot, targetSnapshot] =
+    await Promise.all([
+      db.ref(`users/${followerUid}`).get(),
+      db.ref(`users/${targetUid}`).get(),
+    ]);
   const following =
-    followerSnapshot.child(`following/${targetUid}`).exists() ||
-    followerSnapshot.child(`social/following/${targetUid}`).exists();
+    followerSnapshot
+      .child(`following/${targetUid}`)
+      .exists() ||
+    followerSnapshot
+      .child(`social/following/${targetUid}`)
+      .exists();
   const pending = targetSnapshot
     .child(`followRequests/${followerUid}`)
     .exists();
   return {
     following,
     pending,
-    private: targetSnapshot.val()?.accountType === "private",
+    private:
+      targetSnapshot.val()?.accountType ===
+      "private",
   };
 }
 
@@ -171,24 +245,33 @@ export async function respondToFollowRequest({
 }) {
   if (!db || !ownerUid || !requesterUid)
     throw new Error("Both users are required.");
-  if (ownerUid === requesterUid) throw new Error("Invalid follow request.");
-  const [ownerSnapshot, requesterSnapshot] = await Promise.all([
-    db.ref(`users/${ownerUid}`).get(),
-    db.ref(`users/${requesterUid}`).get(),
-  ]);
-  if (!ownerSnapshot.exists() || !requesterSnapshot.exists())
+  if (ownerUid === requesterUid)
+    throw new Error("Invalid follow request.");
+  const [ownerSnapshot, requesterSnapshot] =
+    await Promise.all([
+      db.ref(`users/${ownerUid}`).get(),
+      db.ref(`users/${requesterUid}`).get(),
+    ]);
+  if (
+    !ownerSnapshot.exists() ||
+    !requesterSnapshot.exists()
+  )
     throw new Error("Profile not found.");
 
   const owner = ownerSnapshot.val() || {};
   const requester = requesterSnapshot.val() || {};
   const requesterEntry = {
     uid: requesterUid,
-    userId: requester.username || `@${requesterUid.slice(0, 8)}`,
+    userId:
+      requester.username ||
+      `@${requesterUid.slice(0, 8)}`,
     name: requester.name || "Indo User",
   };
   const ownerEntry = {
     uid: ownerUid,
-    userId: owner.username || `@${ownerUid.slice(0, 8)}`,
+    userId:
+      owner.username ||
+      `@${ownerUid.slice(0, 8)}`,
     name: owner.name || "Indo User",
   };
   const requestPath = `users/${ownerUid}/followRequests/${requesterUid}`;
@@ -202,8 +285,14 @@ export async function respondToFollowRequest({
     targetEntry: ownerEntry,
     follow: accept,
   });
-  if (!ownerSnapshot.child(`followRequests/${requesterUid}`).exists())
-    throw new Error("Follow request no longer exists.");
+  if (
+    !ownerSnapshot
+      .child(`followRequests/${requesterUid}`)
+      .exists()
+  )
+    throw new Error(
+      "Follow request no longer exists.",
+    );
 
   if (accept) {
     await db.ref().update({
@@ -223,27 +312,51 @@ export async function respondToFollowRequest({
       text: "accepted your follow request",
       targetId: owner.username || "",
     });
-    const [followingSnapshot, followersSnapshot] = await Promise.all([
-      db.ref(`users/${requesterUid}/following`).get(),
-      db.ref(`users/${ownerUid}/followers`).get(),
-    ]);
-    const followingCount = followingSnapshot.exists()
-      ? Object.keys(followingSnapshot.val() || {}).length
-      : 0;
-    const followersCount = followersSnapshot.exists()
-      ? Object.keys(followersSnapshot.val() || {}).length
-      : 0;
+    const [followingSnapshot, followersSnapshot] =
+      await Promise.all([
+        db
+          .ref(`users/${requesterUid}/following`)
+          .get(),
+        db
+          .ref(`users/${ownerUid}/followers`)
+          .get(),
+      ]);
+    const followingCount =
+      followingSnapshot.exists()
+        ? Object.keys(
+            followingSnapshot.val() || {},
+          ).length
+        : 0;
+    const followersCount =
+      followersSnapshot.exists()
+        ? Object.keys(
+            followersSnapshot.val() || {},
+          ).length
+        : 0;
     await db.ref().update({
-      [`users/${requesterUid}/followingCount`]: followingCount,
-      [`users/${ownerUid}/followersCount`]: followersCount,
-      [`users/${requesterUid}/social/followingCount`]: followingCount,
-      [`users/${ownerUid}/social/followersCount`]: followersCount,
+      [`users/${requesterUid}/followingCount`]:
+        followingCount,
+      [`users/${ownerUid}/followersCount`]:
+        followersCount,
+      [`users/${requesterUid}/social/followingCount`]:
+        followingCount,
+      [`users/${ownerUid}/social/followersCount`]:
+        followersCount,
     });
-    return { ok: true, accepted: true, followingCount, followersCount };
+    return {
+      ok: true,
+      accepted: true,
+      followingCount,
+      followersCount,
+    };
   }
 
   await db
     .ref()
-    .update({ [requestPath]: null, [outgoingPath]: null, ...canonicalUpdate });
+    .update({
+      [requestPath]: null,
+      [outgoingPath]: null,
+      ...canonicalUpdate,
+    });
   return { ok: true, accepted: false };
 }
