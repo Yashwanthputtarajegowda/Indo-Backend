@@ -1,6 +1,6 @@
 {
   "name": "indo-backend",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
     "migrate:telegram": "node scripts/migrate-cloudinary-to-telegram.mjs"
   },
   "dependencies": {
+    "busboy": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
