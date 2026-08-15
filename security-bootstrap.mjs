@@ -2,6 +2,7 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import admin from "firebase-admin";
 import { getDatabaseWithUrl } from "firebase-admin/database";
+import { createCloudinarySignature } from "./services/cloudinary-signature.js";
 
 function initFirebase() {
   if (admin.apps.length) return admin.app();
@@ -212,11 +213,62 @@ express.application.post = function securePost(path, ...handlers) {
       const token = header.replace(/^Bearer\s+/i, "").trim();
       if (token.length < 20 || token.length > 16384)
         return res.status(401).json({ ok: false, error: "Invalid authentication token." });
+      let user;
       try {
-        req.securityUser = await auth.verifyIdToken(token, true);
+        user = await auth.verifyIdToken(token, true);
       } catch {
         return res.status(401).json({ ok: false, error: "Invalid or expired authentication token." });
       }
+
+      const originalJson = res.json.bind(res);
+      res.json = (payload) => {
+        try {
+          const kind = String(req.body?.kind || "video").trim().toLowerCase();
+          if (!payload?.ok || !payload?.signature || !payload?.timestamp || !payload?.folder)
+            return originalJson(payload);
+
+          if (kind !== "video" && kind !== "story")
+            return originalJson({ ok: false, error: "Invalid media type." });
+
+          const isStory = kind === "story";
+          const resourceType = isStory ? "image" : "video";
+          const expectedFolder = isStory
+            ? `indo/stories/${user.uid}`
+            : `indo/videos/${user.uid}`;
+          const allowedFormats = isStory
+            ? "jpg,jpeg,png,webp"
+            : "mp4,mov,webm";
+          const maxFileSize = isStory
+            ? 10 * 1024 * 1024
+            : 100 * 1024 * 1024;
+
+          if (payload.folder !== expectedFolder)
+            return originalJson({ ok: false, error: "Invalid upload policy." });
+
+          const timestamp = Number(payload.timestamp);
+          if (!Number.isInteger(timestamp) || Math.abs(Math.floor(Date.now() / 1000) - timestamp) > 300)
+            return originalJson({ ok: false, error: "Upload signature expired." });
+
+          const signature = createCloudinarySignature(timestamp, {
+            folder: expectedFolder,
+            resource_type: resourceType,
+            allowed_formats: allowedFormats,
+            max_file_size: maxFileSize,
+          });
+
+          return originalJson({
+            ...payload,
+            resourceType,
+            allowedFormats,
+            maxFileSize,
+            signature,
+          });
+        } catch {
+          return originalJson({ ok: false, error: "Upload policy could not be issued." });
+        }
+      };
+
+      req.securityUser = user;
       return next();
     };
     return originalPost.call(this, path, mediaSignatureLimiter, guard, ...handlers);
