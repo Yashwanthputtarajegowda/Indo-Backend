@@ -9,7 +9,6 @@ permissions:
 
 jobs:
   format:
-    if: ${{ !contains(github.event.head_commit.message, 'chore: format repository') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,10 +20,7 @@ jobs:
           node-version: 20
 
       - name: Format source and config files
-        run: |
-          npx --yes prettier@3.9.6 --write \
-            "**/*.{js,mjs,json,css,html,yml,yaml}" \
-            --ignore-path .gitignore
+        run: npx --yes prettier@3.9.6 --write "**/*.{js,mjs,json,css,html,yml,yaml}" --ignore-path .gitignore
 
       - name: Remove temporary formatter
         run: rm -f .github/workflows/format-repository.yml
