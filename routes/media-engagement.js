@@ -25,12 +25,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const mediaId = safeText(req.params.mediaId, 120);
     const like = req.body?.like === true;
     if (!mediaId)
@@ -82,12 +80,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const mediaId = safeText(req.params.mediaId, 120);
     try {
       const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
@@ -106,12 +102,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
         saved: Boolean(saveSnapshot.val()),
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not load engagement.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not load engagement.",
+      });
     }
   });
 
@@ -119,12 +113,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const mediaId = safeText(req.params.mediaId, 120);
     const save = req.body?.save === true;
     try {
@@ -146,12 +138,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const mediaId = safeText(req.params.mediaId, 120);
     const text = safeText(req.body?.text, 500);
     if (!text)
@@ -198,12 +188,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const mediaId = safeText(req.params.mediaId, 120);
     try {
       const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
@@ -220,12 +208,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       );
       return res.json({ ok: true, comments });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not load comments.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not load comments.",
+      });
     }
   });
 
@@ -233,12 +219,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     try {
       return res.json({
         ok: true,
@@ -249,12 +233,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
         }),
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not load notifications.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not load notifications.",
+      });
     }
   });
 
@@ -262,12 +244,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     try {
       await markNotificationRead({
         db,
@@ -276,12 +256,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       });
       return res.json({ ok: true });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not mark notification as read.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not mark notification as read.",
+      });
     }
   });
 
@@ -289,12 +267,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const viewer = await requireUser(req, res);
     if (!viewer) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const mediaId = safeText(req.body?.mediaId, 120);
     const seconds = Math.min(15, Math.max(0, Number(req.body?.seconds) || 0));
     if (!mediaId || seconds <= 0)
@@ -318,12 +294,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
         watchSeconds: Number(result.snapshot.val()) || 0,
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not record watch progress.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not record watch progress.",
+      });
     }
   });
 
@@ -331,12 +305,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     try {
       const earning =
         (await db.ref(`users/${user.uid}/earning`).get()).val() || {};
@@ -365,12 +337,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
         },
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not load earning status.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not load earning status.",
+      });
     }
   });
 
@@ -378,12 +348,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const enabled = req.body?.enabled === true;
     try {
       const earningRef = db.ref(`users/${user.uid}/earning`);
@@ -394,14 +362,12 @@ export function createMediaEngagementRouter({ db, requireUser }) {
         Number(earning.watchSeconds?.reel || 0) / 3600 >=
           REEL_ELIGIBILITY_HOURS;
       if (enabled && !eligible)
-        return res
-          .status(403)
-          .json({
-            ok: false,
-            error:
-              "Earning is not eligible yet. Complete both watch-hour requirements first.",
-            eligible: false,
-          });
+        return res.status(403).json({
+          ok: false,
+          error:
+            "Earning is not eligible yet. Complete both watch-hour requirements first.",
+          eligible: false,
+        });
       await earningRef.update({
         enabled,
         enabledAt: enabled ? Date.now() : null,
@@ -410,12 +376,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       });
       return res.json({ ok: true, earningEnabled: enabled, eligible });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not update earning setting.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not update earning setting.",
+      });
     }
   });
 
@@ -423,12 +387,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     try {
       const earning =
         (await db.ref(`users/${user.uid}/earning`).get()).val() || {};
@@ -448,15 +410,13 @@ export function createMediaEngagementRouter({ db, requireUser }) {
         (videoViews / 1000) * VIDEO_RATE_PER_1000_VIEWS +
         (reelViews / 1000) * REEL_RATE_PER_1000_VIEWS;
       const payableRevenue = earning.enabled ? grossRevenue : 0;
-      await db
-        .ref(`users/${user.uid}/earning/summary`)
-        .update({
-          videoViews,
-          reelViews,
-          grossRevenue,
-          payableRevenue,
-          updatedAt: Date.now(),
-        });
+      await db.ref(`users/${user.uid}/earning/summary`).update({
+        videoViews,
+        reelViews,
+        grossRevenue,
+        payableRevenue,
+        updatedAt: Date.now(),
+      });
       return res.json({
         ok: true,
         videoViews,
@@ -470,12 +430,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
         },
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not calculate earning summary.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not calculate earning summary.",
+      });
     }
   });
 
@@ -483,12 +441,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     try {
       const [earningSnapshot, payoutSnapshot] = await Promise.all([
         db.ref(`users/${user.uid}/earning`).get(),
@@ -517,12 +473,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const method = req.body?.method === "bank" ? "bank" : "manual";
     const requestedAmount = Number(req.body?.amount || 0);
     if (!Number.isFinite(requestedAmount) || requestedAmount <= 0)
@@ -535,19 +489,15 @@ export function createMediaEngagementRouter({ db, requireUser }) {
         .get();
       const balance = Number(walletSnapshot.val()?.payableRevenue || 0);
       if (balance < MIN_PAYOUT_USD)
-        return res
-          .status(400)
-          .json({
-            ok: false,
-            error: `Minimum payout is $${MIN_PAYOUT_USD.toFixed(2)}.`,
-          });
+        return res.status(400).json({
+          ok: false,
+          error: `Minimum payout is $${MIN_PAYOUT_USD.toFixed(2)}.`,
+        });
       if (requestedAmount > balance)
-        return res
-          .status(400)
-          .json({
-            ok: false,
-            error: "Requested amount is greater than your available balance.",
-          });
+        return res.status(400).json({
+          ok: false,
+          error: "Requested amount is greater than your available balance.",
+        });
       const payoutRef = db.ref(`users/${user.uid}/payouts`).push();
       const payout = {
         id: payoutRef.key,
@@ -559,12 +509,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       await payoutRef.set(payout);
       return res.status(201).json({ ok: true, payout });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not create payout request.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not create payout request.",
+      });
     }
   });
 

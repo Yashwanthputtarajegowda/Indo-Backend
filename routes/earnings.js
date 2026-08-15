@@ -61,24 +61,20 @@ export function createEarningsRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     try {
       return res.json({
         ok: true,
         ...(await calculateSummary({ db, uid: user.uid })),
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not load earning status.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not load earning status.",
+      });
     }
   });
 
@@ -86,24 +82,20 @@ export function createEarningsRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     try {
       return res.json({
         ok: true,
         ...(await calculateSummary({ db, uid: user.uid })),
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not load earning summary.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not load earning summary.",
+      });
     }
   });
 
@@ -111,38 +103,32 @@ export function createEarningsRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const enabled = req.body?.enabled === true;
     try {
       const summary = await calculateSummary({ db, uid: user.uid });
       if (enabled && !summary.eligible) {
-        return res
-          .status(403)
-          .json({
-            ok: false,
-            error:
-              "Earning is locked until both watch-hour requirements are completed.",
-            eligible: false,
-            videoWatchHours: summary.videoWatchHours,
-            reelWatchHours: summary.reelWatchHours,
-          });
+        return res.status(403).json({
+          ok: false,
+          error:
+            "Earning is locked until both watch-hour requirements are completed.",
+          eligible: false,
+          videoWatchHours: summary.videoWatchHours,
+          reelWatchHours: summary.reelWatchHours,
+        });
       }
       await db
         .ref(`users/${user.uid}/earnings`)
         .update({ enabled, enabledAt: enabled ? Date.now() : null });
       return res.json({ ok: true, enabled });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not update earning status.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not update earning status.",
+      });
     }
   });
 
@@ -150,21 +136,17 @@ export function createEarningsRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const mediaId = String(req.body?.mediaId || "").trim();
     const requestedSeconds = asNumber(req.body?.seconds);
     if (!mediaId || requestedSeconds <= 0)
-      return res
-        .status(400)
-        .json({
-          ok: false,
-          error: "Media ID and positive watch time are required.",
-        });
+      return res.status(400).json({
+        ok: false,
+        error: "Media ID and positive watch time are required.",
+      });
     const seconds = Math.min(15, requestedSeconds);
     try {
       const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
@@ -191,12 +173,10 @@ export function createEarningsRouter({ db, requireUser }) {
         totalWatchSeconds: asNumber(counter.snapshot.val()),
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not record watch progress.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not record watch progress.",
+      });
     }
   });
 

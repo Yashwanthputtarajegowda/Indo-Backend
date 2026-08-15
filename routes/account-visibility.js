@@ -1,6 +1,9 @@
 import express from "express";
 
-const cleanText = (value, max = 500) => String(value ?? "").trim().slice(0, max);
+const cleanText = (value, max = 500) =>
+  String(value ?? "")
+    .trim()
+    .slice(0, max);
 
 async function saveCanonicalProfile({ req, res, db, requireUser }) {
   const user = await requireUser(req, res);
@@ -28,9 +31,10 @@ async function saveCanonicalProfile({ req, res, db, requireUser }) {
     }
 
     const previous = snapshot.val() || {};
-    const previousProfile = previous.profile && typeof previous.profile === "object"
-      ? previous.profile
-      : {};
+    const previousProfile =
+      previous.profile && typeof previous.profile === "object"
+        ? previous.profile
+        : {};
     const now = Date.now();
 
     const profile = {
@@ -39,16 +43,38 @@ async function saveCanonicalProfile({ req, res, db, requireUser }) {
       name,
       displayName: name,
       bio: cleanText(req.body?.bio ?? previousProfile.bio ?? previous.bio, 160),
-      location: cleanText(req.body?.location ?? previousProfile.location ?? previous.location, 100),
-      website: cleanText(req.body?.website ?? previousProfile.website ?? previous.website, 200),
-      role: cleanText(req.body?.role ?? previousProfile.role ?? previous.role ?? "Content Creator", 60),
-      interests: cleanText(req.body?.interests ?? previousProfile.interests ?? previous.interests, 240),
-      language: cleanText(req.body?.language ?? previousProfile.language ?? previous.language ?? "English", 40),
-      accountType: req.body?.visibility === "private"
-        ? "private"
-        : req.body?.visibility === "public"
-          ? "public"
-          : (previousProfile.accountType || previous.accountType || "public"),
+      location: cleanText(
+        req.body?.location ?? previousProfile.location ?? previous.location,
+        100,
+      ),
+      website: cleanText(
+        req.body?.website ?? previousProfile.website ?? previous.website,
+        200,
+      ),
+      role: cleanText(
+        req.body?.role ??
+          previousProfile.role ??
+          previous.role ??
+          "Content Creator",
+        60,
+      ),
+      interests: cleanText(
+        req.body?.interests ?? previousProfile.interests ?? previous.interests,
+        240,
+      ),
+      language: cleanText(
+        req.body?.language ??
+          previousProfile.language ??
+          previous.language ??
+          "English",
+        40,
+      ),
+      accountType:
+        req.body?.visibility === "private"
+          ? "private"
+          : req.body?.visibility === "public"
+            ? "public"
+            : previousProfile.accountType || previous.accountType || "public",
       updatedAt: now,
     };
 
@@ -93,17 +119,29 @@ export function createAccountVisibilityRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db) {
-      return res.status(503).json({ ok: false, error: "Firebase Admin is not configured on the backend." });
+      return res
+        .status(503)
+        .json({
+          ok: false,
+          error: "Firebase Admin is not configured on the backend.",
+        });
     }
-    const accountType = req.body?.accountType === "private" ? "private" : "public";
+    const accountType =
+      req.body?.accountType === "private" ? "private" : "public";
     try {
       const userRef = db.ref(`users/${user.uid}`);
       const snapshot = await userRef.get();
-      if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
+      if (!snapshot.exists())
+        return res.status(404).json({ ok: false, error: "Profile not found." });
       await userRef.update({ accountType, visibilityUpdatedAt: Date.now() });
       return res.json({ ok: true, accountType });
     } catch (error) {
-      return res.status(500).json({ ok: false, error: error.message || "Could not update account visibility." });
+      return res
+        .status(500)
+        .json({
+          ok: false,
+          error: error.message || "Could not update account visibility.",
+        });
     }
   });
 

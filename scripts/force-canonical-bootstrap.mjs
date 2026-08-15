@@ -11,25 +11,34 @@ function initFirebase() {
   if (!clientEmail || !privateKey) return null;
   return admin.initializeApp({
     credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
-    databaseURL: process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
+    databaseURL:
+      process.env.FIREBASE_DATABASE_URL ||
+      "https://indo-174f0-default-rtdb.firebaseio.com",
   });
 }
 
 const app = initFirebase();
 const db = app
   ? getDatabaseWithUrl(
-      process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
+      process.env.FIREBASE_DATABASE_URL ||
+        "https://indo-174f0-default-rtdb.firebaseio.com",
       app,
     )
   : null;
 
 if (!app || !db) {
-  console.error("[canonical-migration] Firebase Admin credentials are missing; migration skipped.");
+  console.error(
+    "[canonical-migration] Firebase Admin credentials are missing; migration skipped.",
+  );
 } else {
-  const version = Number((await db.ref("system/canonicalSchemaVersion/version").get()).val() || 0);
+  const version = Number(
+    (await db.ref("system/canonicalSchemaVersion/version").get()).val() || 0,
+  );
   if (version < 3) {
     const result = await migrateAllUsersToCanonical({ db });
-    console.log(`[canonical-migration] migrated ${result.users} users to version 3`);
+    console.log(
+      `[canonical-migration] migrated ${result.users} users to version 3`,
+    );
   } else {
     console.log(`[canonical-migration] version ${version} already active`);
   }
@@ -40,23 +49,34 @@ if (!app || !db) {
 // independent of an already-migrated profile branch.
 const originalPost = express.application.post;
 express.application.post = function patchedPost(path, ...handlers) {
-  if (path !== "/api/stories") return originalPost.call(this, path, ...handlers);
+  if (path !== "/api/stories")
+    return originalPost.call(this, path, ...handlers);
 
   const saveStory = async (req, res) => {
-    if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+    if (!db)
+      return res
+        .status(503)
+        .json({ ok: false, error: "Firebase database is unavailable." });
     const header = req.headers.authorization || "";
-    if (!header.startsWith("Bearer ")) return res.status(401).json({ ok: false, error: "Authentication required." });
+    if (!header.startsWith("Bearer "))
+      return res
+        .status(401)
+        .json({ ok: false, error: "Authentication required." });
     let user;
     try {
       user = await admin.auth(app).verifyIdToken(header.slice(7));
     } catch {
-      return res.status(401).json({ ok: false, error: "Invalid authentication token." });
+      return res
+        .status(401)
+        .json({ ok: false, error: "Invalid authentication token." });
     }
 
     const publicId = String(req.body?.publicId || "").trim();
     const secureUrl = String(req.body?.secureUrl || "").trim();
     if (!publicId || !secureUrl) {
-      return res.status(400).json({ ok: false, error: "Uploaded story data is required." });
+      return res
+        .status(400)
+        .json({ ok: false, error: "Uploaded story data is required." });
     }
 
     try {
@@ -64,9 +84,19 @@ express.application.post = function patchedPost(path, ...handlers) {
       const userData = userSnapshot.val() || {};
       const profile = userData.profile || {};
       const username = String(
-        profile.username || userData.username || userData.userId || user.email?.split("@")[0] || "User",
+        profile.username ||
+          userData.username ||
+          userData.userId ||
+          user.email?.split("@")[0] ||
+          "User",
       );
-      const name = String(profile.name || userData.name || user.displayName || username || "Indo User");
+      const name = String(
+        profile.name ||
+          userData.name ||
+          user.displayName ||
+          username ||
+          "Indo User",
+      );
       const ref = db.ref("stories").push();
       const story = {
         id: ref.key,
@@ -75,8 +105,13 @@ express.application.post = function patchedPost(path, ...handlers) {
         name,
         publicId,
         secureUrl,
-        title: String(req.body?.title || "").trim().slice(0, 80),
-        titleFont: String(req.body?.titleFont || "Arial, sans-serif").slice(0, 160),
+        title: String(req.body?.title || "")
+          .trim()
+          .slice(0, 80),
+        titleFont: String(req.body?.titleFont || "Arial, sans-serif").slice(
+          0,
+          160,
+        ),
         titleX: Number(req.body?.titleX ?? 50),
         titleY: Number(req.body?.titleY ?? 14),
         crop: String(req.body?.crop || "portrait").slice(0, 20),
@@ -88,12 +123,20 @@ express.application.post = function patchedPost(path, ...handlers) {
         [`stories/${ref.key}`]: story,
         [`users/${user.uid}/content/stories/${ref.key}`]: story,
       });
-      await db.ref(`users/${user.uid}/stats/storiesCount`).transaction((current) => (Number(current) || 0) + 1);
+      await db
+        .ref(`users/${user.uid}/stats/storiesCount`)
+        .transaction((current) => (Number(current) || 0) + 1);
       console.log(`[story-save] saved ${ref.key} for ${user.uid}`);
       return res.status(201).json({ ok: true, story });
     } catch (error) {
       console.error("Story save failed:", error);
-      return res.status(500).json({ ok: false, error: "Could not save story.", detail: String(error?.message || error || "Unknown error") });
+      return res
+        .status(500)
+        .json({
+          ok: false,
+          error: "Could not save story.",
+          detail: String(error?.message || error || "Unknown error"),
+        });
     }
   };
 

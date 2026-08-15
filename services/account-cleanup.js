@@ -1,10 +1,10 @@
-import { destroyCloudinaryVideo } from './cloudinary-signature.js';
+import { destroyCloudinaryVideo } from "./cloudinary-signature.js";
 
 const SIX_MONTHS_MS = 183 * 24 * 60 * 60 * 1000;
 
 async function cleanupExpiredStories({ db, now = Date.now() }) {
   if (!db) return { checked: 0, deleted: 0 };
-  const snapshot = await db.ref('stories').get();
+  const snapshot = await db.ref("stories").get();
   if (!snapshot.exists()) return { checked: 0, deleted: 0 };
 
   const stories = snapshot.val() || {};
@@ -20,7 +20,10 @@ async function cleanupExpiredStories({ db, now = Date.now() }) {
       try {
         await destroyCloudinaryVideo(story.publicId);
       } catch (error) {
-        console.warn('Expired Cloudinary story delete failed:', error?.message || error);
+        console.warn(
+          "Expired Cloudinary story delete failed:",
+          error?.message || error,
+        );
       }
     }
 
@@ -33,11 +36,17 @@ async function cleanupExpiredStories({ db, now = Date.now() }) {
 
 export async function cleanupInactiveAccounts({ db, auth, now = Date.now() }) {
   if (!db || !auth) {
-    return { checked: 0, deleted: 0, storiesChecked: 0, storiesDeleted: 0, skipped: true };
+    return {
+      checked: 0,
+      deleted: 0,
+      storiesChecked: 0,
+      storiesDeleted: 0,
+      skipped: true,
+    };
   }
 
   const storyCleanup = await cleanupExpiredStories({ db, now });
-  const snapshot = await db.ref('users').get();
+  const snapshot = await db.ref("users").get();
 
   if (!snapshot.exists()) {
     return { checked: 0, deleted: 0, ...storyCleanup, skipped: false };
@@ -72,7 +81,7 @@ export async function cleanupInactiveAccounts({ db, auth, now = Date.now() }) {
     try {
       await auth.deleteUser(uid);
     } catch (error) {
-      if (error?.code !== 'auth/user-not-found') {
+      if (error?.code !== "auth/user-not-found") {
         throw error;
       }
     }

@@ -42,12 +42,10 @@ export async function canViewPrivateMedia({
 }) {
   const header = req.headers.authorization || "";
   if (!header.startsWith("Bearer ")) {
-    res
-      .status(401)
-      .json({
-        ok: false,
-        error: "Login required to view this private account.",
-      });
+    res.status(401).json({
+      ok: false,
+      error: "Login required to view this private account.",
+    });
     return false;
   }
   const requester = await requireUser(req, res);
@@ -61,12 +59,10 @@ export async function canViewPrivateMedia({
     .ref(`users/${ownerUid}/followers/${requester.uid}`)
     .get();
   if (!follower.exists()) {
-    res
-      .status(403)
-      .json({
-        ok: false,
-        error: "Follow this private account to view its content.",
-      });
+    res.status(403).json({
+      ok: false,
+      error: "Follow this private account to view its content.",
+    });
     return false;
   }
   return true;
@@ -113,7 +109,10 @@ function mixPriority(items, requesterUid, followingUids) {
   for (const entry of scored) {
     const ownerUid = String(entry.item?.ownerUid || "");
     const isFollowed = followingSet.has(ownerUid) || ownerUid === requesterUid;
-    const ageHours = Math.max(0, (Date.now() - Number(entry.item?.createdAt || 0)) / 36e5);
+    const ageHours = Math.max(
+      0,
+      (Date.now() - Number(entry.item?.createdAt || 0)) / 36e5,
+    );
     if (isFollowed) followed.push(entry);
     else if (ageHours <= 48) fresh.push(entry);
     else regular.push(entry);
@@ -130,7 +129,9 @@ function mixPriority(items, requesterUid, followingUids) {
     }
     return copy;
   };
-  return [...shuffle(followed), ...shuffle(fresh), ...shuffle(regular)].map(({ item }) => item);
+  return [...shuffle(followed), ...shuffle(fresh), ...shuffle(regular)].map(
+    ({ item }) => item,
+  );
 }
 
 export function createSocialBlockRouter({ db, requireUser }) {
@@ -140,12 +141,10 @@ export function createSocialBlockRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     try {
       const snapshot = await db.ref(`users/${user.uid}/blocked`).get();
       const users = Object.values(snapshot.val() || {}).sort((a, b) =>
@@ -153,12 +152,10 @@ export function createSocialBlockRouter({ db, requireUser }) {
       );
       return res.json({ ok: true, users });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not load blocked users.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not load blocked users.",
+      });
     }
   });
 
@@ -166,12 +163,10 @@ export function createSocialBlockRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const targetUid = clean(req.body?.targetUid);
     const blocked = req.body?.blocked === true;
     if (!targetUid)
@@ -210,12 +205,10 @@ export function createSocialBlockRouter({ db, requireUser }) {
       });
       return res.json({ ok: true, blocked, user: payload });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not update blocked user.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not update blocked user.",
+      });
     }
   });
 
@@ -223,12 +216,10 @@ export function createSocialBlockRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     try {
       const [incomingSnapshot, outgoingSnapshot] = await Promise.all([
         db.ref(`users/${user.uid}/followRequests`).get(),
@@ -240,12 +231,10 @@ export function createSocialBlockRouter({ db, requireUser }) {
         outgoing: Object.values(outgoingSnapshot.val() || {}),
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not load follow requests.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not load follow requests.",
+      });
     }
   });
 
@@ -253,12 +242,10 @@ export function createSocialBlockRouter({ db, requireUser }) {
     const user = await requireUser(req, res);
     if (!user) return;
     if (!db)
-      return res
-        .status(503)
-        .json({
-          ok: false,
-          error: "Firebase Admin is not configured on the backend.",
-        });
+      return res.status(503).json({
+        ok: false,
+        error: "Firebase Admin is not configured on the backend.",
+      });
     const requesterUid = clean(req.params.requesterUid);
     const accept = req.body?.accept === true;
     if (!requesterUid)
@@ -274,12 +261,10 @@ export function createSocialBlockRouter({ db, requireUser }) {
       });
       return res.json(result);
     } catch (error) {
-      return res
-        .status(400)
-        .json({
-          ok: false,
-          error: error.message || "Could not respond to follow request.",
-        });
+      return res.status(400).json({
+        ok: false,
+        error: error.message || "Could not respond to follow request.",
+      });
     }
   });
 
@@ -370,8 +355,11 @@ export function createSocialBlockRouter({ db, requireUser }) {
       const followingUids = new Set();
 
       if (requester?.uid) {
-        const followingSnapshot = await db.ref(`users/${requester.uid}/following`).get();
-        for (const uid of Object.keys(followingSnapshot.val() || {})) followingUids.add(String(uid));
+        const followingSnapshot = await db
+          .ref(`users/${requester.uid}/following`)
+          .get();
+        for (const uid of Object.keys(followingSnapshot.val() || {}))
+          followingUids.add(String(uid));
       }
 
       for (const video of candidates) {
@@ -443,12 +431,10 @@ export function createSocialBlockRouter({ db, requireUser }) {
         views: Number(result.snapshot.val()) || 0,
       });
     } catch (error) {
-      return res
-        .status(500)
-        .json({
-          ok: false,
-          error: error.message || "Could not record video view.",
-        });
+      return res.status(500).json({
+        ok: false,
+        error: error.message || "Could not record video view.",
+      });
     }
   });
 

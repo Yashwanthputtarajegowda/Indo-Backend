@@ -50,7 +50,13 @@ export async function toggleFollow({ db, followerUid, targetUid, follow }) {
   const targetPath = `users/${targetUid}/followers/${followerUid}`;
   const requestPath = `users/${targetUid}/followRequests/${followerUid}`;
   const outgoingPath = `users/${followerUid}/sentFollowRequests/${targetUid}`;
-  const canonicalUpdate = canonicalFollowUpdate({ followerUid, targetUid, followerEntry, targetEntry, follow });
+  const canonicalUpdate = canonicalFollowUpdate({
+    followerUid,
+    targetUid,
+    followerEntry,
+    targetEntry,
+    follow,
+  });
   const alreadyFollowing = followerSnapshot
     .child(`following/${targetUid}`)
     .exists();
@@ -144,8 +150,9 @@ export async function getFollowStatus({ db, followerUid, targetUid }) {
     db.ref(`users/${followerUid}`).get(),
     db.ref(`users/${targetUid}`).get(),
   ]);
-  const following = followerSnapshot.child(`following/${targetUid}`).exists()
-    || followerSnapshot.child(`social/following/${targetUid}`).exists();
+  const following =
+    followerSnapshot.child(`following/${targetUid}`).exists() ||
+    followerSnapshot.child(`social/following/${targetUid}`).exists();
   const pending = targetSnapshot
     .child(`followRequests/${followerUid}`)
     .exists();
@@ -188,7 +195,13 @@ export async function respondToFollowRequest({
   const outgoingPath = `users/${requesterUid}/sentFollowRequests/${ownerUid}`;
   const followerPath = `users/${ownerUid}/followers/${requesterUid}`;
   const followingPath = `users/${requesterUid}/following/${ownerUid}`;
-  const canonicalUpdate = canonicalFollowUpdate({ followerUid: requesterUid, targetUid: ownerUid, followerEntry: requesterEntry, targetEntry: ownerEntry, follow: accept });
+  const canonicalUpdate = canonicalFollowUpdate({
+    followerUid: requesterUid,
+    targetUid: ownerUid,
+    followerEntry: requesterEntry,
+    targetEntry: ownerEntry,
+    follow: accept,
+  });
   if (!ownerSnapshot.child(`followRequests/${requesterUid}`).exists())
     throw new Error("Follow request no longer exists.");
 
@@ -229,6 +242,8 @@ export async function respondToFollowRequest({
     return { ok: true, accepted: true, followingCount, followersCount };
   }
 
-  await db.ref().update({ [requestPath]: null, [outgoingPath]: null, ...canonicalUpdate });
+  await db
+    .ref()
+    .update({ [requestPath]: null, [outgoingPath]: null, ...canonicalUpdate });
   return { ok: true, accepted: false };
 }
