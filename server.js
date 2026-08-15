@@ -229,6 +229,20 @@ app.get("/api/account/profile/:username", async (req, res) => {
   } catch { return res.status(500).json({ ok: false, error: "Could not load profile." }); }
 });
 
+app.get("/api/account/public-profile/:uid", async (req, res) => {
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const uid = String(req.params.uid || "").trim();
+  if (!uid || uid.length > 128) return res.status(400).json({ ok: false, error: "Invalid profile UID." });
+  try {
+    const profileSnapshot = await db.ref(`users/${uid}`).get();
+    if (!profileSnapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
+    const profile = profileSnapshot.val() || {};
+    return res.json({ ok: true, profile: profile.profile || profile });
+  } catch {
+    return res.status(500).json({ ok: false, error: "Could not load profile." });
+  }
+});
+
 app.get("/api/account/me", async (req, res) => {
   const user = await requireUser(req, res); if (!user) return; if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
   try {
