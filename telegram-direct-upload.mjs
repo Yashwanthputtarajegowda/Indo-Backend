@@ -8,6 +8,19 @@ import { saveCanonicalVideo } from "./services/canonical-content.js";
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
+const ALLOWED_FRONTEND_ORIGINS = new Set([
+  "https://yashwanthputtarajegowda.github.io",
+]);
+
+function applyUploadCors(req, res) {
+  const origin = String(req.headers.origin || "").replace(/\/$/, "");
+  if (ALLOWED_FRONTEND_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Vary", "Origin");
+  }
+}
 
 function getFirebase() {
   if (admin.apps.length) return admin.app();
@@ -28,11 +41,11 @@ async function requireUser(req, res) {
     return null;
   }
   const header = String(req.headers.authorization || "");
-  if (!/^Bearer\\s+\\S+$/i.test(header)) {
+  if (!/^Bearer\s+\S+$/i.test(header)) {
     res.status(401).json({ ok: false, error: "Authentication required." });
     return null;
   }
-  const token = header.replace(/^Bearer\\s+/i, "").trim();
+  const token = header.replace(/^Bearer\s+/i, "").trim();
   try {
     return await admin.auth(app).verifyIdToken(token, true);
   } catch {
@@ -96,6 +109,9 @@ if (!express.application.__indoDirectTelegramUpload) {
   express.application.use = function indoDirectTelegramUse(...args) {
     originalUse.call(this, async (req, res, next) => {
       if (req.method !== "POST" || req.path !== "/api/media/videos/upload") return next();
+
+      applyUploadCors(req, res);
+
       if (!telegramStorageConfigured()) {
         return res.status(503).json({ ok: false, error: "Telegram storage is temporarily unavailable." });
       }
