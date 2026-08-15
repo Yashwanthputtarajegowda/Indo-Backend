@@ -1,6 +1,6 @@
 {
   "name": "indo-backend",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,9 @@
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "express": "^5.1.0",
-    "firebase-admin": "^13.0.2"
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
+    "firebase-admin": "^13.0.2",
+    "helmet": "^8.1.0"
   }
 }
