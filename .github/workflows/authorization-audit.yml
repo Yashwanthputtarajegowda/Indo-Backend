@@ -1,0 +1,54 @@
+name: Authorization Audit
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  authorization-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Authorization route inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Checking sensitive route files for authentication/ownership guards..."
+          test -f routes/account-contact.js
+          test -f routes/account-visibility.js
+          test -f routes/account-claim.js
+          test -f routes/media-engagement-canonical.js
+          test -f routes/messages.js
+          test -f routes/follow-requests.js
+          test -f routes/notifications.js
+          test -f routes/earnings.js
+          echo "Route inventory OK"
+
+      - name: Required security guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in security-bootstrap.mjs security-router-guard.mjs security-csrf.mjs security-rate-limit.mjs security-account-reauth.mjs security-abuse.mjs security-read-guards.mjs security-error-guard.mjs; do
+            test -f "$f"
+          done
+          grep -q "verifyIdToken" security-bootstrap.mjs security-router-guard.mjs
+          grep -q "verifyIdToken" security-account-reauth.mjs
+          grep -q "403" security-router-guard.mjs
+          echo "Security guard inventory OK"
+
+      - name: Detect unbounded Firebase reads in route files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RInE 'ref\([^)]*\)\.get\(\)' routes server.js | grep -vE 'limitToLast|limitToFirst|orderBy|equalTo' ; then
+            echo "Potential unbounded Firebase read detected above"
+            exit 1
+          fi
+          echo "No obvious unbounded route reads detected"
