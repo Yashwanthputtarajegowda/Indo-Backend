@@ -98,7 +98,10 @@ export async function getTelegramFileUrl(fileId) {
   const file = await telegramCall("getFile", form);
   const filePath = String(file?.file_path || "").trim();
   if (!filePath) throw new Error("Telegram file path is missing.");
-  return `https://api.telegram.org/file/bot${encodeURIComponent(BOT_TOKEN())}/${filePath}`;
+
+  // Telegram file URLs require the bot token in the path in its original form.
+  // Do not encode the token here; the Bot API file endpoint expects the literal token.
+  return `https://api.telegram.org/file/bot${BOT_TOKEN()}/${filePath}`;
 }
 
 export async function deleteTelegramMessage(messageId) {
