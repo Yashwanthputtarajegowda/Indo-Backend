@@ -134,5 +134,36 @@ export function createAccountClaimRouter({ db, requireUser }) {
     }
   });
 
+  router.get("/account/search-users", async (req, res) => {
+    if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+    const query = normalizeUserId(req.query?.q);
+    if (!query || !validUserId(query)) return res.json({ ok: true, users: [] });
+    try {
+      const snapshot = await db.ref("users").get();
+      const users = Object.entries(snapshot.val() || {})
+        .map(([uid, value]) => {
+          const profile = value?.profile || {};
+          const userId = normalizeUserId(profile.userId || profile.username || value?.userId || value?.username);
+          if (!userId || !userId.startsWith(query)) return null;
+          return {
+            uid,
+            userId: `@${userId}`,
+            name: String(profile.name || value?.name || "Indo User"),
+            avatarUrl: String(profile.avatarUrl || profile.photoURL || value?.avatarUrl || value?.photoURL || ""),
+            isVerified: Boolean(profile.isVerified || value?.isVerified),
+            postsCount: Number(value?.stats?.postsCount ?? profile.postsCount ?? 0),
+            followersCount: Number(value?.stats?.followersCount ?? profile.followersCount ?? 0),
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.userId.localeCompare(b.userId))
+        .slice(0, 20);
+      return res.json({ ok: true, users });
+    } catch (error) {
+      console.error("User search failed:", error);
+      return res.status(500).json({ ok: false, error: "Could not search users." });
+    }
+  });
+
   return router;
 }
