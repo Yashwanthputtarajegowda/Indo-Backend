@@ -4,6 +4,8 @@ const configured = String(process.env.CORS_ORIGINS || "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-process.env.CORS_ORIGINS = [...new Set([...configured, productionOrigin])].join(",");
+process.env.CORS_ORIGINS = [...new Set([...configured, productionOrigin])].join(
+  ",",
+);
 
 await import("./start-production.migration-helper.mjs");

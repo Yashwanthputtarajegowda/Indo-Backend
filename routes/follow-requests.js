@@ -1,5 +1,9 @@
 import express from "express";
-import { respondToFollowRequest, toggleFollow, getFollowStatus } from "../services/social-follow.js";
+import {
+  respondToFollowRequest,
+  toggleFollow,
+  getFollowStatus,
+} from "../services/social-follow.js";
 import { syncCanonicalUser } from "../services/user-canonical.js";
 
 function entryList(snapshot) {
@@ -19,7 +23,13 @@ async function resolveTargetUid(db, rawTarget) {
   const direct = await db.ref(`users/${value}`).get();
   if (direct.exists()) return value;
   const normalized = value.toLowerCase().replace(/^@/, "");
-  const encoded = normalized.replace(/\./g, "%2E").replace(/#/g, "%23").replace(/\$/g, "%24").replace(/\//g, "%2F").replace(/\[/g, "%5B").replace(/\]/g, "%5D");
+  const encoded = normalized
+    .replace(/\./g, "%2E")
+    .replace(/#/g, "%23")
+    .replace(/\$/g, "%24")
+    .replace(/\//g, "%2F")
+    .replace(/\[/g, "%5B")
+    .replace(/\]/g, "%5D");
   const claim = await db.ref(`usernames/${encoded}`).get();
   return String(claim.val()?.uid || "");
 }
@@ -36,7 +46,10 @@ export function createFollowRequestsRouter({ db, requireUser }) {
         error: "Firebase Admin is not configured on the backend.",
       });
     try {
-      const [incomingSnapshot, outgoingSnapshot] = await Promise.all([db.ref(`users/${user.uid}/followRequests`).get(), db.ref(`users/${user.uid}/sentFollowRequests`).get()]);
+      const [incomingSnapshot, outgoingSnapshot] = await Promise.all([
+        db.ref(`users/${user.uid}/followRequests`).get(),
+        db.ref(`users/${user.uid}/sentFollowRequests`).get(),
+      ]);
       return res.json({
         ok: true,
         incoming: Object.values(incomingSnapshot.val() || {}),
@@ -60,7 +73,10 @@ export function createFollowRequestsRouter({ db, requireUser }) {
       });
     const requesterUid = String(req.params.requesterUid || "").trim();
     const accept = req.body?.accept === true;
-    if (!requesterUid) return res.status(400).json({ ok: false, error: "Requester is required." });
+    if (!requesterUid)
+      return res
+        .status(400)
+        .json({ ok: false, error: "Requester is required." });
     try {
       const result = await respondToFollowRequest({
         db,
@@ -87,7 +103,10 @@ export function createFollowRequestsRouter({ db, requireUser }) {
       });
     const targetUid = String(req.body?.targetUid || "").trim();
     const follow = req.body?.follow === true;
-    if (!targetUid) return res.status(400).json({ ok: false, error: "Target user is required." });
+    if (!targetUid)
+      return res
+        .status(400)
+        .json({ ok: false, error: "Target user is required." });
     try {
       const result = await toggleFollow({
         db,
@@ -138,7 +157,8 @@ export function createFollowRequestsRouter({ db, requireUser }) {
       });
     try {
       const targetUid = await resolveTargetUid(db, req.params.targetUid);
-      if (!targetUid) return res.status(404).json({ ok: false, error: "Profile not found." });
+      if (!targetUid)
+        return res.status(404).json({ ok: false, error: "Profile not found." });
       const canonical = await syncCanonicalUser({
         db,
         uid: targetUid,
@@ -148,12 +168,21 @@ export function createFollowRequestsRouter({ db, requireUser }) {
         uid: targetUid,
         username: canonical.profile.username || "",
         userId: canonical.profile.userId || canonical.profile.username || "",
-        name: canonical.profile.name || canonical.profile.displayName || "Indo User",
-        displayName: canonical.profile.displayName || canonical.profile.name || "Indo User",
+        name:
+          canonical.profile.name ||
+          canonical.profile.displayName ||
+          "Indo User",
+        displayName:
+          canonical.profile.displayName ||
+          canonical.profile.name ||
+          "Indo User",
         bio: canonical.profile.bio || "",
-        photoURL: canonical.profile.photoURL || canonical.profile.avatarUrl || "",
+        photoURL:
+          canonical.profile.photoURL || canonical.profile.avatarUrl || "",
         accountType: canonical.settings.accountType,
-        isVerified: Boolean(canonical.profile.isVerified || canonical.verification.isVerified),
+        isVerified: Boolean(
+          canonical.profile.isVerified || canonical.verification.isVerified,
+        ),
       };
       return res.json({
         ok: true,
@@ -168,7 +197,9 @@ export function createFollowRequestsRouter({ db, requireUser }) {
         stories: Object.values(canonical.content.stories),
       });
     } catch (error) {
-      return res.status(500).json({ ok: false, error: error.message || "Could not load profile." });
+      return res
+        .status(500)
+        .json({ ok: false, error: error.message || "Could not load profile." });
     }
   });
 
@@ -181,25 +212,40 @@ export function createFollowRequestsRouter({ db, requireUser }) {
         error: "Firebase Admin is not configured on the backend.",
       });
     const rawTarget = String(req.params.targetUid || "").trim();
-    if (!rawTarget) return res.status(400).json({ ok: false, error: "Target user is required." });
+    if (!rawTarget)
+      return res
+        .status(400)
+        .json({ ok: false, error: "Target user is required." });
     try {
       const targetUid = await resolveTargetUid(db, rawTarget);
-      if (!targetUid) return res.status(404).json({ ok: false, error: "Profile not found." });
+      if (!targetUid)
+        return res.status(404).json({ ok: false, error: "Profile not found." });
       const canonical = await syncCanonicalUser({
         db,
         uid: targetUid,
         includeContent: false,
       });
-      if (String(user.uid) !== targetUid && canonical.settings.accountType === "private") {
-        const follower = await db.ref(`users/${targetUid}/social/followers/${user.uid}`).get();
-        const legacyFollower = follower.exists() ? follower : await db.ref(`users/${targetUid}/followers/${user.uid}`).get();
+      if (
+        String(user.uid) !== targetUid &&
+        canonical.settings.accountType === "private"
+      ) {
+        const follower = await db
+          .ref(`users/${targetUid}/social/followers/${user.uid}`)
+          .get();
+        const legacyFollower = follower.exists()
+          ? follower
+          : await db.ref(`users/${targetUid}/followers/${user.uid}`).get();
         if (!legacyFollower.exists())
           return res.status(403).json({
             ok: false,
-            error: "Follow this private account to view its followers/following.",
+            error:
+              "Follow this private account to view its followers/following.",
           });
       }
-      const relationItems = relation === "followers" ? canonical.social.followers : canonical.social.following;
+      const relationItems =
+        relation === "followers"
+          ? canonical.social.followers
+          : canonical.social.following;
       const items = entryList({ val: () => relationItems });
       return res.json({
         ok: true,
@@ -216,8 +262,12 @@ export function createFollowRequestsRouter({ db, requireUser }) {
     }
   }
 
-  router.get("/social/followers/:targetUid", (req, res) => listRelationship(req, res, "followers"));
-  router.get("/social/following/:targetUid", (req, res) => listRelationship(req, res, "following"));
+  router.get("/social/followers/:targetUid", (req, res) =>
+    listRelationship(req, res, "followers"),
+  );
+  router.get("/social/following/:targetUid", (req, res) =>
+    listRelationship(req, res, "following"),
+  );
 
   return router;
 }

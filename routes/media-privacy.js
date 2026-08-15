@@ -9,7 +9,10 @@ function clean(value, max = 500) {
 
 async function blockedEitherWay(db, requesterUid, ownerUid) {
   if (!requesterUid || !ownerUid || requesterUid === ownerUid) return false;
-  const [a, b] = await Promise.all([db.ref(`users/${requesterUid}/blocked/${ownerUid}`).get(), db.ref(`users/${ownerUid}/blocked/${requesterUid}`).get()]);
+  const [a, b] = await Promise.all([
+    db.ref(`users/${requesterUid}/blocked/${ownerUid}`).get(),
+    db.ref(`users/${ownerUid}/blocked/${requesterUid}`).get(),
+  ]);
   return a.exists() || b.exists();
 }
 
@@ -20,7 +23,9 @@ async function canAccessMedia({ db, user, media }) {
   if (user.uid === ownerUid) return true;
   const owner = (await db.ref(`users/${ownerUid}`).get()).val() || {};
   if ((owner.accountType || "public") !== "private") return true;
-  const follower = await db.ref(`users/${ownerUid}/followers/${user.uid}`).get();
+  const follower = await db
+    .ref(`users/${ownerUid}/followers/${user.uid}`)
+    .get();
   return follower.exists();
 }
 
@@ -42,7 +47,9 @@ export function createMediaPrivacyRouter({ db, requireUser }) {
     }
     const media = snapshot.val() || {};
     if (!(await canAccessMedia({ db, user, media }))) {
-      res.status(403).json({ ok: false, error: "You do not have access to this media." });
+      res
+        .status(403)
+        .json({ ok: false, error: "You do not have access to this media." });
       return null;
     }
     return { user, mediaId, media };
@@ -96,7 +103,10 @@ export function createMediaPrivacyRouter({ db, requireUser }) {
     if (!route) return;
     const { user, mediaId, media } = route;
     try {
-      const [likeSnapshot, saveSnapshot] = await Promise.all([db.ref(`videoLikes/${mediaId}/${user.uid}`).get(), db.ref(`videoSaves/${mediaId}/${user.uid}`).get()]);
+      const [likeSnapshot, saveSnapshot] = await Promise.all([
+        db.ref(`videoLikes/${mediaId}/${user.uid}`).get(),
+        db.ref(`videoSaves/${mediaId}/${user.uid}`).get(),
+      ]);
       return res.json({
         ok: true,
         likes: Number(media.likes || 0),
@@ -126,7 +136,10 @@ export function createMediaPrivacyRouter({ db, requireUser }) {
     if (!route) return;
     const { user, mediaId, media } = route;
     const text = clean(req.body?.text, 500);
-    if (!text) return res.status(400).json({ ok: false, error: "Comment cannot be empty." });
+    if (!text)
+      return res
+        .status(400)
+        .json({ ok: false, error: "Comment cannot be empty." });
     try {
       const profile = (await db.ref(`users/${user.uid}`).get()).val() || {};
       const ref = db.ref(`videoComments/${mediaId}`).push();
@@ -162,8 +175,13 @@ export function createMediaPrivacyRouter({ db, requireUser }) {
     if (!route) return;
     const { mediaId } = route;
     try {
-      const snapshot = await db.ref(`videoComments/${mediaId}`).limitToLast(100).get();
-      const comments = Object.values(snapshot.val() || {}).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+      const snapshot = await db
+        .ref(`videoComments/${mediaId}`)
+        .limitToLast(100)
+        .get();
+      const comments = Object.values(snapshot.val() || {}).sort(
+        (a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0),
+      );
       return res.json({ ok: true, comments });
     } catch (error) {
       return next(error);

@@ -1,8 +1,14 @@
 import express from "express";
-import { createCloudinarySignature, getCloudinaryConfig } from "../services/cloudinary-signature.js";
+import {
+  createCloudinarySignature,
+  getCloudinaryConfig,
+} from "../services/cloudinary-signature.js";
 
 function publicProfile(profile = {}) {
-  const canonical = profile.profile && typeof profile.profile === "object" ? profile.profile : profile;
+  const canonical =
+    profile.profile && typeof profile.profile === "object"
+      ? profile.profile
+      : profile;
   const source = { ...profile, ...canonical };
   return {
     uid: source.uid || "",
@@ -13,15 +19,22 @@ function publicProfile(profile = {}) {
     avatarUrl: source.avatarUrl || source.photoURL || source.photoUrl || "",
     photoURL: source.photoURL || source.avatarUrl || source.photoUrl || "",
     accountType: source.accountType === "private" ? "private" : "public",
-    followersCount: Number(source.followersCount || source.stats?.followersCount || 0),
-    followingCount: Number(source.followingCount || source.stats?.followingCount || 0),
+    followersCount: Number(
+      source.followersCount || source.stats?.followersCount || 0,
+    ),
+    followingCount: Number(
+      source.followingCount || source.stats?.followingCount || 0,
+    ),
     postsCount: Number(source.postsCount || source.stats?.postsCount || 0),
   };
 }
 
 async function isBlockedEitherWay(db, requesterUid, targetUid) {
   if (!requesterUid || !targetUid || requesterUid === targetUid) return false;
-  const [a, b] = await Promise.all([db.ref(`users/${requesterUid}/blocked/${targetUid}`).get(), db.ref(`users/${targetUid}/blocked/${requesterUid}`).get()]);
+  const [a, b] = await Promise.all([
+    db.ref(`users/${requesterUid}/blocked/${targetUid}`).get(),
+    db.ref(`users/${targetUid}/blocked/${requesterUid}`).get(),
+  ]);
   return a.exists() || b.exists();
 }
 
@@ -33,8 +46,10 @@ function clean(value, max = 500) {
 function validateAvatarData(value) {
   const data = String(value || "").trim();
   if (!data) return "";
-  if (!/^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(data)) throw new Error("Invalid profile photo.");
-  if (data.length > 7 * 1024 * 1024) throw new Error("Profile photo is too large.");
+  if (!/^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(data))
+    throw new Error("Invalid profile photo.");
+  if (data.length > 7 * 1024 * 1024)
+    throw new Error("Profile photo is too large.");
   return data;
 }
 async function uploadProfileAvatar({ uid, data }) {
@@ -58,9 +73,13 @@ async function uploadProfileAvatar({ uid, data }) {
     overwrite: "true",
     invalidate: "true",
   });
-  const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`, { method: "POST", body });
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`,
+    { method: "POST", body },
+  );
   const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.secure_url) throw new Error(result.error?.message || "Could not upload profile photo.");
+  if (!response.ok || !result.secure_url)
+    throw new Error(result.error?.message || "Could not upload profile photo.");
   return String(result.secure_url);
 }
 
@@ -82,15 +101,26 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
     const role = clean(req.body?.role, 60);
     const interests = clean(req.body?.interests, 240);
     const language = clean(req.body?.language, 40);
-    const visibility = req.body?.visibility === "private" ? "private" : "public";
-    if (!name) return res.status(400).json({ ok: false, error: "User Name is required." });
+    const visibility =
+      req.body?.visibility === "private" ? "private" : "public";
+    if (!name)
+      return res
+        .status(400)
+        .json({ ok: false, error: "User Name is required." });
     try {
       const userRef = db.ref(`users/${user.uid}`);
       const snapshot = await userRef.get();
-      if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
+      if (!snapshot.exists())
+        return res.status(404).json({ ok: false, error: "Profile not found." });
       const previous = snapshot.val() || {};
       const previousProfile = previous.profile || {};
-      let avatarUrl = String(previousProfile.avatarUrl || previousProfile.photoURL || previous.avatarUrl || previous.photoURL || "");
+      let avatarUrl = String(
+        previousProfile.avatarUrl ||
+          previousProfile.photoURL ||
+          previous.avatarUrl ||
+          previous.photoURL ||
+          "",
+      );
       if (req.body?.avatarData)
         avatarUrl = await uploadProfileAvatar({
           uid: user.uid,
@@ -102,7 +132,11 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
         ...previousProfile,
         uid: user.uid,
         userId: previousProfile.userId || previous.userId || "",
-        username: previousProfile.username || previous.username || previous.userId || "",
+        username:
+          previousProfile.username ||
+          previous.username ||
+          previous.userId ||
+          "",
         name,
         displayName: name,
         bio,
@@ -154,13 +188,23 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
     const email = String(req.body?.email || user.email || "")
       .trim()
       .toLowerCase();
-    if (!mobile) return res.status(400).json({ ok: false, error: "Mobile number is required." });
-    if (!/^\+?[0-9 ()-]{7,20}$/.test(mobile)) return res.status(400).json({ ok: false, error: "Invalid mobile number." });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ ok: false, error: "Invalid email address." });
+    if (!mobile)
+      return res
+        .status(400)
+        .json({ ok: false, error: "Mobile number is required." });
+    if (!/^\+?[0-9 ()-]{7,20}$/.test(mobile))
+      return res
+        .status(400)
+        .json({ ok: false, error: "Invalid mobile number." });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return res
+        .status(400)
+        .json({ ok: false, error: "Invalid email address." });
     try {
       const userRef = db.ref(`users/${user.uid}`);
       const snapshot = await userRef.get();
-      if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
+      if (!snapshot.exists())
+        return res.status(404).json({ ok: false, error: "Profile not found." });
       await userRef.update({ mobile, email, contactUpdatedAt: Date.now() });
       return res.json({ ok: true, mobile, email });
     } catch (error) {
@@ -180,16 +224,20 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
         error: "Firebase Admin is not configured on the backend.",
       });
     const uid = String(req.params.uid || "").trim();
-    if (!uid) return res.status(400).json({ ok: false, error: "User ID is required." });
+    if (!uid)
+      return res.status(400).json({ ok: false, error: "User ID is required." });
     try {
       const snapshot = await db.ref(`users/${uid}`).get();
-      if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
+      if (!snapshot.exists())
+        return res.status(404).json({ ok: false, error: "Profile not found." });
       return res.json({
         ok: true,
         profile: publicProfile(snapshot.val() || {}),
       });
     } catch (error) {
-      return res.status(500).json({ ok: false, error: error.message || "Could not load profile." });
+      return res
+        .status(500)
+        .json({ ok: false, error: error.message || "Could not load profile." });
     }
   });
 
@@ -202,18 +250,27 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
         error: "Firebase Admin is not configured on the backend.",
       });
     const targetUid = clean(req.params.targetUid, 160);
-    if (!targetUid || targetUid === user.uid) return res.status(400).json({ ok: false, error: "Valid recipient is required." });
+    if (!targetUid || targetUid === user.uid)
+      return res
+        .status(400)
+        .json({ ok: false, error: "Valid recipient is required." });
     try {
       const targetSnapshot = await db.ref(`users/${targetUid}`).get();
-      if (!targetSnapshot.exists()) return res.status(404).json({ ok: false, error: "Recipient profile not found." });
+      if (!targetSnapshot.exists())
+        return res
+          .status(404)
+          .json({ ok: false, error: "Recipient profile not found." });
       if (await isBlockedEitherWay(db, user.uid, targetUid))
         return res.status(403).json({
           ok: false,
-          error: "Messaging is unavailable because one account has blocked the other.",
+          error:
+            "Messaging is unavailable because one account has blocked the other.",
         });
       const key = [user.uid, targetUid].sort().join("_");
       const snapshot = await db.ref(`messages/${key}`).limitToLast(100).get();
-      const messages = Object.values(snapshot.val() || {}).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+      const messages = Object.values(snapshot.val() || {}).sort(
+        (a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0),
+      );
       return res.json({
         ok: true,
         messages,
@@ -237,15 +294,28 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
       });
     const targetUid = clean(req.params.targetUid, 160);
     const text = clean(req.body?.text, 1000);
-    if (!targetUid || targetUid === user.uid) return res.status(400).json({ ok: false, error: "Valid recipient is required." });
-    if (!text) return res.status(400).json({ ok: false, error: "Message cannot be empty." });
+    if (!targetUid || targetUid === user.uid)
+      return res
+        .status(400)
+        .json({ ok: false, error: "Valid recipient is required." });
+    if (!text)
+      return res
+        .status(400)
+        .json({ ok: false, error: "Message cannot be empty." });
     try {
-      const [senderSnapshot, targetSnapshot] = await Promise.all([db.ref(`users/${user.uid}`).get(), db.ref(`users/${targetUid}`).get()]);
-      if (!targetSnapshot.exists()) return res.status(404).json({ ok: false, error: "Recipient profile not found." });
+      const [senderSnapshot, targetSnapshot] = await Promise.all([
+        db.ref(`users/${user.uid}`).get(),
+        db.ref(`users/${targetUid}`).get(),
+      ]);
+      if (!targetSnapshot.exists())
+        return res
+          .status(404)
+          .json({ ok: false, error: "Recipient profile not found." });
       if (await isBlockedEitherWay(db, user.uid, targetUid))
         return res.status(403).json({
           ok: false,
-          error: "Messaging is unavailable because one account has blocked the other.",
+          error:
+            "Messaging is unavailable because one account has blocked the other.",
         });
       const sender = senderSnapshot.val() || {};
       const key = [user.uid, targetUid].sort().join("_");
@@ -260,9 +330,21 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
         createdAt: Date.now(),
       };
       await ref.set(message);
-      const senderAvatar = String(sender.profile?.avatarUrl || sender.profile?.photoURL || sender.avatarUrl || sender.photoURL || "");
+      const senderAvatar = String(
+        sender.profile?.avatarUrl ||
+          sender.profile?.photoURL ||
+          sender.avatarUrl ||
+          sender.photoURL ||
+          "",
+      );
       const recipient = targetSnapshot.val() || {};
-      const recipientAvatar = String(recipient.profile?.avatarUrl || recipient.profile?.photoURL || recipient.avatarUrl || recipient.photoURL || "");
+      const recipientAvatar = String(
+        recipient.profile?.avatarUrl ||
+          recipient.profile?.photoURL ||
+          recipient.avatarUrl ||
+          recipient.photoURL ||
+          "",
+      );
       await db.ref(`messageInbox/${targetUid}/${key}`).set({
         conversationId: key,
         otherUid: user.uid,
@@ -285,7 +367,9 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
       });
       return res.status(201).json({ ok: true, message });
     } catch (error) {
-      return res.status(500).json({ ok: false, error: error.message || "Could not send message." });
+      return res
+        .status(500)
+        .json({ ok: false, error: error.message || "Could not send message." });
     }
   });
 
@@ -298,13 +382,18 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
         error: "Firebase Admin is not configured on the backend.",
       });
     const targetUid = clean(req.params.targetUid, 160);
-    if (!targetUid || targetUid === user.uid) return res.status(400).json({ ok: false, error: "Valid recipient is required." });
+    if (!targetUid || targetUid === user.uid)
+      return res
+        .status(400)
+        .json({ ok: false, error: "Valid recipient is required." });
     try {
       const key = [user.uid, targetUid].sort().join("_");
       const snapshot = await db.ref(`messages/${key}`).limitToLast(100).get();
       const messages = snapshot.val() || {};
       const updates = {};
-      for (const [id, message] of Object.entries(messages)) if (message?.recipientUid === user.uid && !message.readByRecipient) updates[`messages/${key}/${id}/readByRecipient`] = true;
+      for (const [id, message] of Object.entries(messages))
+        if (message?.recipientUid === user.uid && !message.readByRecipient)
+          updates[`messages/${key}/${id}/readByRecipient`] = true;
       if (Object.keys(updates).length) await db.ref().update(updates);
       await db.ref(`messageInbox/${user.uid}/${key}/unread`).set(false);
       return res.json({ ok: true });
@@ -326,7 +415,9 @@ export function createAccountContactRouter({ db, auth, requireUser }) {
       });
     try {
       const snapshot = await db.ref(`messageInbox/${user.uid}`).get();
-      const conversations = Object.values(snapshot.val() || {}).sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+      const conversations = Object.values(snapshot.val() || {}).sort(
+        (a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0),
+      );
       return res.json({ ok: true, conversations });
     } catch (error) {
       return res.status(500).json({

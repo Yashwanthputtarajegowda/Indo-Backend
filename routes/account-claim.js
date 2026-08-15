@@ -1,5 +1,8 @@
 import express from "express";
-import { createCloudinarySignature, getCloudinaryConfig } from "../services/cloudinary-signature.js";
+import {
+  createCloudinarySignature,
+  getCloudinaryConfig,
+} from "../services/cloudinary-signature.js";
 import { syncCanonicalUser } from "../services/user-canonical.js";
 
 function normalizeUserId(value) {
@@ -28,7 +31,13 @@ async function legacyUserIdTaken(db, userId, uid) {
   const users = usersSnapshot.val() || {};
   return Object.entries(users).some(([otherUid, other]) => {
     if (String(otherUid) === uid) return false;
-    const existing = normalizeUserId(other?.profile?.userId || other?.profile?.username || other?.userId || other?.username || "");
+    const existing = normalizeUserId(
+      other?.profile?.userId ||
+        other?.profile?.username ||
+        other?.userId ||
+        other?.username ||
+        "",
+    );
     return existing === userId;
   });
 }
@@ -47,7 +56,9 @@ async function findUidByUserId(db, identifier) {
   const users = (await db.ref("users").get()).val() || {};
   const match = Object.entries(users).find(([uid, value]) => {
     const profile = value?.profile || {};
-    const current = normalizeUserId(profile.userId || profile.username || value?.userId || value?.username);
+    const current = normalizeUserId(
+      profile.userId || profile.username || value?.userId || value?.username,
+    );
     return current === cleanId || String(uid) === cleanId;
   });
   return match ? String(match[0]) : "";
@@ -58,7 +69,9 @@ function shapeProfile(profile = {}, stats = {}) {
     ...profile,
     uid: String(profile.uid || ""),
     userId: normalizeUserId(profile.userId || profile.username),
-    username: profile.username || (profile.userId ? `@${normalizeUserId(profile.userId)}` : ""),
+    username:
+      profile.username ||
+      (profile.userId ? `@${normalizeUserId(profile.userId)}` : ""),
     name: String(profile.name || profile.displayName || ""),
     displayName: String(profile.displayName || profile.name || ""),
     bio: String(profile.bio || ""),
@@ -86,25 +99,38 @@ export function createAccountClaimRouter({ db, requireUser }) {
   router.post("/account/claim-user-id", async (req, res) => {
     const user = await requireUser(req, res);
     if (!user) return;
-    if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+    if (!db)
+      return res
+        .status(503)
+        .json({ ok: false, error: "Firebase database is unavailable." });
 
     const uid = String(user.uid || "").trim();
     const userId = normalizeUserId(req.body?.userId);
     const name = String(req.body?.name || "")
       .trim()
       .slice(0, 120);
-    const accountType = String(req.body?.accountType || "public") === "private" ? "private" : "public";
+    const accountType =
+      String(req.body?.accountType || "public") === "private"
+        ? "private"
+        : "public";
 
-    if (!uid) return res.status(400).json({ ok: false, error: "User is required." });
-    if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
-    if (!name) return res.status(400).json({ ok: false, error: "User Name is required." });
+    if (!uid)
+      return res.status(400).json({ ok: false, error: "User is required." });
+    if (!validUserId(userId))
+      return res.status(400).json({ ok: false, error: "Invalid User ID." });
+    if (!name)
+      return res
+        .status(400)
+        .json({ ok: false, error: "User Name is required." });
 
     const key = userIdKey(userId);
     const username = `@${userId}`;
 
     try {
       if (await legacyUserIdTaken(db, userId, uid)) {
-        return res.status(409).json({ ok: false, error: `${username} is already taken.` });
+        return res
+          .status(409)
+          .json({ ok: false, error: `${username} is already taken.` });
       }
 
       const claimRef = db.ref(`usernames/${key}`);
@@ -114,12 +140,16 @@ export function createAccountClaimRouter({ db, requireUser }) {
       });
 
       if (!claimResult.committed) {
-        return res.status(409).json({ ok: false, error: `${username} is already taken.` });
+        return res
+          .status(409)
+          .json({ ok: false, error: `${username} is already taken.` });
       }
 
       const claim = claimResult.snapshot.val() || {};
       if (String(claim.uid || "") !== uid) {
-        return res.status(409).json({ ok: false, error: `${username} is already taken.` });
+        return res
+          .status(409)
+          .json({ ok: false, error: `${username} is already taken.` });
       }
 
       const now = Date.now();
@@ -140,7 +170,8 @@ export function createAccountClaimRouter({ db, requireUser }) {
       };
       const profilePrivate = {
         ...(current.profilePrivate || {}),
-        email: user.email || current.profilePrivate?.email || current.email || "",
+        email:
+          user.email || current.profilePrivate?.email || current.email || "",
       };
 
       await db.ref().update({
@@ -156,7 +187,9 @@ export function createAccountClaimRouter({ db, requireUser }) {
 
       const verify = (await db.ref(`users/${uid}/profile`).get()).val() || {};
       if (normalizeUserId(verify.userId || verify.username) !== userId) {
-        await claimRef.transaction((current) => (String(current?.uid || "") === uid ? null : current));
+        await claimRef.transaction((current) =>
+          String(current?.uid || "") === uid ? null : current,
+        );
         return res.status(500).json({
           ok: false,
           error: "Could not verify the Indo profile write.",
@@ -175,12 +208,17 @@ export function createAccountClaimRouter({ db, requireUser }) {
   });
 
   router.post("/account/check-user-id", async (req, res) => {
-    if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+    if (!db)
+      return res
+        .status(503)
+        .json({ ok: false, error: "Firebase database is unavailable." });
     const userId = normalizeUserId(req.body?.userId);
-    if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
+    if (!validUserId(userId))
+      return res.status(400).json({ ok: false, error: "Invalid User ID." });
     try {
       const indexed = await db.ref(`usernames/${userIdKey(userId)}`).get();
-      if (indexed.exists()) return res.json({ ok: true, available: false, userId });
+      if (indexed.exists())
+        return res.json({ ok: true, available: false, userId });
       const taken = await legacyUserIdTaken(db, userId, "");
       return res.json({ ok: true, available: !taken, userId });
     } catch (error) {
@@ -193,7 +231,10 @@ export function createAccountClaimRouter({ db, requireUser }) {
   });
 
   router.get("/account/search-users", async (req, res) => {
-    if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+    if (!db)
+      return res
+        .status(503)
+        .json({ ok: false, error: "Firebase database is unavailable." });
     const query = normalizeUserId(req.query?.q);
     if (!query || !validUserId(query)) return res.json({ ok: true, users: [] });
     try {
@@ -201,16 +242,31 @@ export function createAccountClaimRouter({ db, requireUser }) {
       const users = Object.entries(snapshot.val() || {})
         .map(([uid, value]) => {
           const profile = value?.profile || {};
-          const userId = normalizeUserId(profile.userId || profile.username || value?.userId || value?.username);
+          const userId = normalizeUserId(
+            profile.userId ||
+              profile.username ||
+              value?.userId ||
+              value?.username,
+          );
           if (!userId || !userId.startsWith(query)) return null;
           return {
             uid,
             userId: `@${userId}`,
             name: String(profile.name || value?.name || "Indo User"),
-            avatarUrl: String(profile.avatarUrl || profile.photoURL || value?.avatarUrl || value?.photoURL || ""),
+            avatarUrl: String(
+              profile.avatarUrl ||
+                profile.photoURL ||
+                value?.avatarUrl ||
+                value?.photoURL ||
+                "",
+            ),
             isVerified: Boolean(profile.isVerified || value?.isVerified),
-            postsCount: Number(value?.stats?.postsCount ?? profile.postsCount ?? 0),
-            followersCount: Number(value?.stats?.followersCount ?? profile.followersCount ?? 0),
+            postsCount: Number(
+              value?.stats?.postsCount ?? profile.postsCount ?? 0,
+            ),
+            followersCount: Number(
+              value?.stats?.followersCount ?? profile.followersCount ?? 0,
+            ),
           };
         })
         .filter(Boolean)
@@ -219,14 +275,19 @@ export function createAccountClaimRouter({ db, requireUser }) {
       return res.json({ ok: true, users });
     } catch (error) {
       console.error("User search failed:", error);
-      return res.status(500).json({ ok: false, error: "Could not search users." });
+      return res
+        .status(500)
+        .json({ ok: false, error: "Could not search users." });
     }
   });
 
   router.get("/account/me", async (req, res) => {
     const user = await requireUser(req, res);
     if (!user) return;
-    if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+    if (!db)
+      return res
+        .status(503)
+        .json({ ok: false, error: "Firebase database is unavailable." });
     try {
       const canonical = await syncCanonicalUser({
         db,
@@ -241,17 +302,23 @@ export function createAccountClaimRouter({ db, requireUser }) {
       });
     } catch (error) {
       console.error("Load own profile failed:", error);
-      return res.status(500).json({ ok: false, error: "Could not load profile." });
+      return res
+        .status(500)
+        .json({ ok: false, error: "Could not load profile." });
     }
   });
 
   router.get("/account/profile/:identifier", async (req, res) => {
     const viewer = await requireUser(req, res);
     if (!viewer) return;
-    if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+    if (!db)
+      return res
+        .status(503)
+        .json({ ok: false, error: "Firebase database is unavailable." });
     try {
       const uid = await findUidByUserId(db, req.params.identifier);
-      if (!uid) return res.status(404).json({ ok: false, error: "Profile not found." });
+      if (!uid)
+        return res.status(404).json({ ok: false, error: "Profile not found." });
       const canonical = await syncCanonicalUser({
         db,
         uid,
@@ -265,26 +332,39 @@ export function createAccountClaimRouter({ db, requireUser }) {
       });
     } catch (error) {
       console.error("Load profile failed:", error);
-      return res.status(500).json({ ok: false, error: "Could not load profile." });
+      return res
+        .status(500)
+        .json({ ok: false, error: "Could not load profile." });
     }
   });
 
   router.patch("/account/profile", async (req, res) => {
     const user = await requireUser(req, res);
     if (!user) return;
-    if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+    if (!db)
+      return res
+        .status(503)
+        .json({ ok: false, error: "Firebase database is unavailable." });
 
     const uid = String(user.uid || "").trim();
     const current = (await db.ref(`users/${uid}`).get()).val() || {};
     const currentProfile = current.profile || {};
     const name = clean(req.body?.name, 80);
-    if (!name) return res.status(400).json({ ok: false, error: "Name is required." });
+    if (!name)
+      return res.status(400).json({ ok: false, error: "Name is required." });
 
     const nextProfile = {
       ...currentProfile,
       uid,
-      userId: normalizeUserId(currentProfile.userId || current.userId || current.username),
-      username: currentProfile.username || current.username || (currentProfile.userId ? `@${normalizeUserId(currentProfile.userId)}` : ""),
+      userId: normalizeUserId(
+        currentProfile.userId || current.userId || current.username,
+      ),
+      username:
+        currentProfile.username ||
+        current.username ||
+        (currentProfile.userId
+          ? `@${normalizeUserId(currentProfile.userId)}`
+          : ""),
       name,
       displayName: name,
       bio: clean(req.body?.bio, 160),
@@ -293,9 +373,23 @@ export function createAccountClaimRouter({ db, requireUser }) {
       role: clean(req.body?.role, 60),
       interests: clean(req.body?.interests, 240),
       language: clean(req.body?.language, 40),
-      visibility: String(req.body?.visibility || "public") === "private" ? "private" : "public",
-      avatarUrl: clean(req.body?.avatarUrl || currentProfile.avatarUrl || currentProfile.photoURL, 1200),
-      photoURL: clean(req.body?.photoURL || req.body?.avatarUrl || currentProfile.photoURL || currentProfile.avatarUrl, 1200),
+      visibility:
+        String(req.body?.visibility || "public") === "private"
+          ? "private"
+          : "public",
+      avatarUrl: clean(
+        req.body?.avatarUrl ||
+          currentProfile.avatarUrl ||
+          currentProfile.photoURL,
+        1200,
+      ),
+      photoURL: clean(
+        req.body?.photoURL ||
+          req.body?.avatarUrl ||
+          currentProfile.photoURL ||
+          currentProfile.avatarUrl,
+        1200,
+      ),
       updatedAt: Date.now(),
     };
 
@@ -318,7 +412,9 @@ export function createAccountClaimRouter({ db, requireUser }) {
       });
     } catch (error) {
       console.error("Save profile failed:", error);
-      return res.status(500).json({ ok: false, error: "Could not save profile." });
+      return res
+        .status(500)
+        .json({ ok: false, error: "Could not save profile." });
     }
   });
 

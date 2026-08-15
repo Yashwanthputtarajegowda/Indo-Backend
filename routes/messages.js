@@ -30,7 +30,9 @@ export function createMessagesRouter({ db, requireUser }) {
       return null;
     }
     if (targetUid === user.uid) {
-      res.status(400).json({ ok: false, error: "You cannot message yourself." });
+      res
+        .status(400)
+        .json({ ok: false, error: "You cannot message yourself." });
       return null;
     }
     if (!db) {
@@ -54,7 +56,9 @@ export function createMessagesRouter({ db, requireUser }) {
         ownerUid: targetUid,
       })
     ) {
-      res.status(403).json({ ok: false, error: "Messaging is unavailable for this user." });
+      res
+        .status(403)
+        .json({ ok: false, error: "Messaging is unavailable for this user." });
       return null;
     }
 
@@ -67,7 +71,9 @@ export function createMessagesRouter({ db, requireUser }) {
       if (!context) return;
       const id = conversationId(context.user.uid, context.targetUid);
       const snapshot = await db.ref(`messages/${id}`).limitToLast(200).get();
-      const messages = Object.values(snapshot.val() || {}).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+      const messages = Object.values(snapshot.val() || {}).sort(
+        (a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0),
+      );
       return res.json({
         ok: true,
         conversationId: id,
@@ -88,7 +94,9 @@ export function createMessagesRouter({ db, requireUser }) {
 
       const text = clean(req.body?.text);
       if (!text) {
-        return res.status(400).json({ ok: false, error: "Message cannot be empty." });
+        return res
+          .status(400)
+          .json({ ok: false, error: "Message cannot be empty." });
       }
 
       const id = conversationId(context.user.uid, context.targetUid);
@@ -105,22 +113,36 @@ export function createMessagesRouter({ db, requireUser }) {
       };
 
       await ref.set(message);
-      await db.ref(`conversations/${context.user.uid}/${context.targetUid}`).update({
-        uid: context.targetUid,
-        username: context.target.username || `@${context.targetUid.slice(0, 8)}`,
-        name: context.target.name || "Indo User",
-        lastMessage: text,
-        lastMessageAt: message.createdAt,
-        unreadCount: 0,
-      });
-      await db.ref(`conversations/${context.targetUid}/${context.user.uid}`).update({
-        uid: context.user.uid,
-        username: sender?.username || `@${context.user.uid.slice(0, 8)}`,
-        name: sender?.name || "Indo User",
-        lastMessage: text,
-        lastMessageAt: message.createdAt,
-        unreadCount: Number((await db.ref(`conversations/${context.targetUid}/${context.user.uid}/unreadCount`).get()).val() || 0) + 1,
-      });
+      await db
+        .ref(`conversations/${context.user.uid}/${context.targetUid}`)
+        .update({
+          uid: context.targetUid,
+          username:
+            context.target.username || `@${context.targetUid.slice(0, 8)}`,
+          name: context.target.name || "Indo User",
+          lastMessage: text,
+          lastMessageAt: message.createdAt,
+          unreadCount: 0,
+        });
+      await db
+        .ref(`conversations/${context.targetUid}/${context.user.uid}`)
+        .update({
+          uid: context.user.uid,
+          username: sender?.username || `@${context.user.uid.slice(0, 8)}`,
+          name: sender?.name || "Indo User",
+          lastMessage: text,
+          lastMessageAt: message.createdAt,
+          unreadCount:
+            Number(
+              (
+                await db
+                  .ref(
+                    `conversations/${context.targetUid}/${context.user.uid}/unreadCount`,
+                  )
+                  .get()
+              ).val() || 0,
+            ) + 1,
+        });
 
       await createNotification({
         db,
@@ -146,7 +168,11 @@ export function createMessagesRouter({ db, requireUser }) {
     try {
       const context = await requireMessagingUsers(req, res);
       if (!context) return;
-      await db.ref(`conversations/${context.user.uid}/${context.targetUid}/unreadCount`).set(0);
+      await db
+        .ref(
+          `conversations/${context.user.uid}/${context.targetUid}/unreadCount`,
+        )
+        .set(0);
       return res.json({ ok: true });
     } catch (error) {
       return res.status(500).json({
@@ -167,7 +193,9 @@ export function createMessagesRouter({ db, requireUser }) {
     }
     try {
       const snapshot = await db.ref(`conversations/${user.uid}`).get();
-      const conversations = Object.values(snapshot.val() || {}).sort((a, b) => Number(b.lastMessageAt || 0) - Number(a.lastMessageAt || 0));
+      const conversations = Object.values(snapshot.val() || {}).sort(
+        (a, b) => Number(b.lastMessageAt || 0) - Number(a.lastMessageAt || 0),
+      );
       return res.json({ ok: true, conversations });
     } catch (error) {
       return res.status(500).json({
