@@ -1,9 +1,5 @@
 import express from "express";
-import {
-  createNotification,
-  listNotifications,
-  markNotificationRead,
-} from "../services/notifications.js";
+import { createNotification, listNotifications, markNotificationRead } from "../services/notifications.js";
 import { canAccessMedia } from "./social-block.js";
 
 function safeText(value, max = 500) {
@@ -81,14 +77,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const mediaId = safeText(req.params.mediaId, 120);
     try {
       const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
-      if (!mediaSnapshot.exists())
-        return res.status(404).json({ ok: false, error: "Media not found." });
+      if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: "Media not found." });
       const media = mediaSnapshot.val() || {};
       if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
-      const [likeSnapshot, saveSnapshot] = await Promise.all([
-        db.ref(`videoLikes/${mediaId}/${user.uid}`).get(),
-        db.ref(`videoSaves/${mediaId}/${user.uid}`).get(),
-      ]);
+      const [likeSnapshot, saveSnapshot] = await Promise.all([db.ref(`videoLikes/${mediaId}/${user.uid}`).get(), db.ref(`videoSaves/${mediaId}/${user.uid}`).get()]);
       return res.json({
         ok: true,
         likes: Number(media.likes || 0),
@@ -115,8 +107,7 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const save = req.body?.save === true;
     try {
       const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
-      if (!mediaSnapshot.exists())
-        return res.status(404).json({ ok: false, error: "Media not found." });
+      if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: "Media not found." });
       const media = mediaSnapshot.val() || {};
       if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
       await db.ref(`videoSaves/${mediaId}/${user.uid}`).set(save || null);
@@ -139,8 +130,7 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     if (!text) return res.status(400).json({ ok: false, error: "Comment cannot be empty." });
     try {
       const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
-      if (!mediaSnapshot.exists())
-        return res.status(404).json({ ok: false, error: "Media not found." });
+      if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: "Media not found." });
       const media = mediaSnapshot.val() || {};
       if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
       const profile = (await db.ref(`users/${user.uid}`).get()).val() || {};
@@ -182,14 +172,11 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     const mediaId = safeText(req.params.mediaId, 120);
     try {
       const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
-      if (!mediaSnapshot.exists())
-        return res.status(404).json({ ok: false, error: "Media not found." });
+      if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: "Media not found." });
       const media = mediaSnapshot.val() || {};
       if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
       const snapshot = await db.ref(`videoComments/${mediaId}`).limitToLast(100).get();
-      const comments = Object.values(snapshot.val() || {}).sort(
-        (a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0),
-      );
+      const comments = Object.values(snapshot.val() || {}).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
       return res.json({ ok: true, comments });
     } catch (error) {
       return res.status(500).json({
@@ -257,17 +244,14 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       });
     const mediaId = safeText(req.body?.mediaId, 120);
     const seconds = Math.min(15, Math.max(0, Number(req.body?.seconds) || 0));
-    if (!mediaId || seconds <= 0)
-      return res.status(400).json({ ok: false, error: "Media ID and watch seconds are required." });
+    if (!mediaId || seconds <= 0) return res.status(400).json({ ok: false, error: "Media ID and watch seconds are required." });
     try {
       const media = (await db.ref(`videos/${mediaId}`).get()).val() || {};
       const ownerUid = String(media.ownerUid || "");
       if (!ownerUid || ownerUid === viewer.uid) return res.json({ ok: true, counted: false });
       if (!(await canAccessMedia({ db, requireUser, req, res, media }))) return;
       const typeKey = media.mediaType === "reel" ? "reel" : "video";
-      const result = await db
-        .ref(`users/${ownerUid}/earning/watchSeconds/${typeKey}`)
-        .transaction((current) => (Number(current) || 0) + seconds);
+      const result = await db.ref(`users/${ownerUid}/earning/watchSeconds/${typeKey}`).transaction((current) => (Number(current) || 0) + seconds);
       return res.json({
         ok: true,
         counted: true,
@@ -296,8 +280,7 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       const reelWatchSeconds = Number(earning.watchSeconds?.reel || 0);
       const videoWatchHours = videoWatchSeconds / 3600;
       const reelWatchHours = reelWatchSeconds / 3600;
-      const eligible =
-        videoWatchHours >= VIDEO_ELIGIBILITY_HOURS && reelWatchHours >= REEL_ELIGIBILITY_HOURS;
+      const eligible = videoWatchHours >= VIDEO_ELIGIBILITY_HOURS && reelWatchHours >= REEL_ELIGIBILITY_HOURS;
       return res.json({
         ok: true,
         eligible,
@@ -335,9 +318,7 @@ export function createMediaEngagementRouter({ db, requireUser }) {
     try {
       const earningRef = db.ref(`users/${user.uid}/earning`);
       const earning = (await earningRef.get()).val() || {};
-      const eligible =
-        Number(earning.watchSeconds?.video || 0) / 3600 >= VIDEO_ELIGIBILITY_HOURS &&
-        Number(earning.watchSeconds?.reel || 0) / 3600 >= REEL_ELIGIBILITY_HOURS;
+      const eligible = Number(earning.watchSeconds?.video || 0) / 3600 >= VIDEO_ELIGIBILITY_HOURS && Number(earning.watchSeconds?.reel || 0) / 3600 >= REEL_ELIGIBILITY_HOURS;
       if (enabled && !eligible)
         return res.status(403).json({
           ok: false,
@@ -371,15 +352,9 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       const earning = (await db.ref(`users/${user.uid}/earning`).get()).val() || {};
       const snapshot = await db.ref("videos").orderByChild("ownerUid").equalTo(user.uid).get();
       const ownVideos = Object.values(snapshot.val() || {});
-      const videoViews = ownVideos
-        .filter((item) => (item.mediaType || "video") === "video")
-        .reduce((sum, item) => sum + Math.max(0, Number(item.views) || 0), 0);
-      const reelViews = ownVideos
-        .filter((item) => item.mediaType === "reel")
-        .reduce((sum, item) => sum + Math.max(0, Number(item.views) || 0), 0);
-      const grossRevenue =
-        (videoViews / 1000) * VIDEO_RATE_PER_1000_VIEWS +
-        (reelViews / 1000) * REEL_RATE_PER_1000_VIEWS;
+      const videoViews = ownVideos.filter((item) => (item.mediaType || "video") === "video").reduce((sum, item) => sum + Math.max(0, Number(item.views) || 0), 0);
+      const reelViews = ownVideos.filter((item) => item.mediaType === "reel").reduce((sum, item) => sum + Math.max(0, Number(item.views) || 0), 0);
+      const grossRevenue = (videoViews / 1000) * VIDEO_RATE_PER_1000_VIEWS + (reelViews / 1000) * REEL_RATE_PER_1000_VIEWS;
       const payableRevenue = earning.enabled ? grossRevenue : 0;
       await db.ref(`users/${user.uid}/earning/summary`).update({
         videoViews,
@@ -417,15 +392,10 @@ export function createMediaEngagementRouter({ db, requireUser }) {
         error: "Firebase Admin is not configured on the backend.",
       });
     try {
-      const [earningSnapshot, payoutSnapshot] = await Promise.all([
-        db.ref(`users/${user.uid}/earning`).get(),
-        db.ref(`users/${user.uid}/payouts`).limitToLast(50).get(),
-      ]);
+      const [earningSnapshot, payoutSnapshot] = await Promise.all([db.ref(`users/${user.uid}/earning`).get(), db.ref(`users/${user.uid}/payouts`).limitToLast(50).get()]);
       const earning = earningSnapshot.val() || {};
       const summary = earning.summary || {};
-      const payouts = Object.values(payoutSnapshot.val() || {}).sort(
-        (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0),
-      );
+      const payouts = Object.values(payoutSnapshot.val() || {}).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
       return res.json({
         ok: true,
         balance: Number(summary.payableRevenue || 0),
@@ -448,8 +418,7 @@ export function createMediaEngagementRouter({ db, requireUser }) {
       });
     const method = req.body?.method === "bank" ? "bank" : "manual";
     const requestedAmount = Number(req.body?.amount || 0);
-    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0)
-      return res.status(400).json({ ok: false, error: "Enter a valid payout amount." });
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) return res.status(400).json({ ok: false, error: "Enter a valid payout amount." });
     try {
       const walletSnapshot = await db.ref(`users/${user.uid}/earning/summary`).get();
       const balance = Number(walletSnapshot.val()?.payableRevenue || 0);

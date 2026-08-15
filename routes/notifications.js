@@ -1,10 +1,5 @@
 import express from "express";
-import {
-  listNotifications,
-  countUnreadNotifications,
-  markNotificationRead,
-  markAllNotificationsRead,
-} from "../services/notifications.js";
+import { listNotifications, countUnreadNotifications, markNotificationRead, markAllNotificationsRead } from "../services/notifications.js";
 
 export function createNotificationsRouter({ db, requireUser }) {
   const router = express.Router();
@@ -49,8 +44,7 @@ export function createNotificationsRouter({ db, requireUser }) {
     if (!user) return;
     if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
     const notificationId = String(req.params.notificationId || "").trim();
-    if (!notificationId)
-      return res.status(400).json({ ok: false, error: "Notification ID is required." });
+    if (!notificationId) return res.status(400).json({ ok: false, error: "Notification ID is required." });
     try {
       await markNotificationRead({ db, uid: user.uid, notificationId });
       return res.json({ ok: true, notificationId, read: true });

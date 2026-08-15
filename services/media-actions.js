@@ -21,10 +21,7 @@ export async function toggleMediaLike({ db, uid, mediaId, like }) {
 
 export async function getMediaLikeStatus({ db, uid, mediaId }) {
   if (!db) throw new Error("Firebase Admin is not configured.");
-  const [likeSnapshot, countSnapshot] = await Promise.all([
-    db.ref(`mediaLikes/${mediaId}/${uid}`).get(),
-    db.ref(`videos/${mediaId}/likes`).get(),
-  ]);
+  const [likeSnapshot, countSnapshot] = await Promise.all([db.ref(`mediaLikes/${mediaId}/${uid}`).get(), db.ref(`videos/${mediaId}/likes`).get()]);
   return {
     liked: likeSnapshot.exists(),
     likes: Number(countSnapshot.val()) || 0,

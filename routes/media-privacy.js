@@ -9,10 +9,7 @@ function clean(value, max = 500) {
 
 async function blockedEitherWay(db, requesterUid, ownerUid) {
   if (!requesterUid || !ownerUid || requesterUid === ownerUid) return false;
-  const [a, b] = await Promise.all([
-    db.ref(`users/${requesterUid}/blocked/${ownerUid}`).get(),
-    db.ref(`users/${ownerUid}/blocked/${requesterUid}`).get(),
-  ]);
+  const [a, b] = await Promise.all([db.ref(`users/${requesterUid}/blocked/${ownerUid}`).get(), db.ref(`users/${ownerUid}/blocked/${requesterUid}`).get()]);
   return a.exists() || b.exists();
 }
 
@@ -99,10 +96,7 @@ export function createMediaPrivacyRouter({ db, requireUser }) {
     if (!route) return;
     const { user, mediaId, media } = route;
     try {
-      const [likeSnapshot, saveSnapshot] = await Promise.all([
-        db.ref(`videoLikes/${mediaId}/${user.uid}`).get(),
-        db.ref(`videoSaves/${mediaId}/${user.uid}`).get(),
-      ]);
+      const [likeSnapshot, saveSnapshot] = await Promise.all([db.ref(`videoLikes/${mediaId}/${user.uid}`).get(), db.ref(`videoSaves/${mediaId}/${user.uid}`).get()]);
       return res.json({
         ok: true,
         likes: Number(media.likes || 0),
@@ -169,9 +163,7 @@ export function createMediaPrivacyRouter({ db, requireUser }) {
     const { mediaId } = route;
     try {
       const snapshot = await db.ref(`videoComments/${mediaId}`).limitToLast(100).get();
-      const comments = Object.values(snapshot.val() || {}).sort(
-        (a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0),
-      );
+      const comments = Object.values(snapshot.val() || {}).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
       return res.json({ ok: true, comments });
     } catch (error) {
       return next(error);

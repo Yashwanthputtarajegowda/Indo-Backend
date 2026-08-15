@@ -10,18 +10,12 @@ function initFirebase() {
   if (!clientEmail || !privateKey) return null;
   return admin.initializeApp({
     credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
-    databaseURL:
-      process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
+    databaseURL: process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
   });
 }
 
 const firebaseApp = initFirebase();
-const db = firebaseApp
-  ? getDatabaseWithUrl(
-      process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
-      firebaseApp,
-    )
-  : null;
+const db = firebaseApp ? getDatabaseWithUrl(process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com", firebaseApp) : null;
 
 const probeRouter = express.Router();
 const originalRouterPost = express.Router.prototype.post || probeRouter.post;
@@ -38,20 +32,16 @@ function validUserId(userId) {
 }
 
 function extractUserId(user = {}) {
-  return normalizeUserId(
-    user?.profile?.userId || user?.profile?.username || user?.userId || user?.username || "",
-  );
+  return normalizeUserId(user?.profile?.userId || user?.profile?.username || user?.userId || user?.username || "");
 }
 
 if (express.Router.prototype?.post) {
   express.Router.prototype.post = function signupAvailabilityRouterPost(path, ...handlers) {
     if (path === "/account/check-user-id") {
       const handler = async (req, res) => {
-        if (!db)
-          return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+        if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
         const userId = normalizeUserId(req.body?.userId);
-        if (!validUserId(userId))
-          return res.status(400).json({ ok: false, error: "Invalid User ID." });
+        if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
         try {
           // Canonical schema source-of-truth: users/{uid}/profile.userId.
           // Read the user collection and compare against the canonical profile value.

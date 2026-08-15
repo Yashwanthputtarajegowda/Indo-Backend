@@ -1,8 +1,5 @@
 import express from "express";
-import {
-  createCloudinarySignature,
-  getCloudinaryConfig,
-} from "../services/cloudinary-signature.js";
+import { createCloudinarySignature, getCloudinaryConfig } from "../services/cloudinary-signature.js";
 import { syncCanonicalUser } from "../services/user-canonical.js";
 
 function normalizeUserId(value) {
@@ -31,9 +28,7 @@ async function legacyUserIdTaken(db, userId, uid) {
   const users = usersSnapshot.val() || {};
   return Object.entries(users).some(([otherUid, other]) => {
     if (String(otherUid) === uid) return false;
-    const existing = normalizeUserId(
-      other?.profile?.userId || other?.profile?.username || other?.userId || other?.username || "",
-    );
+    const existing = normalizeUserId(other?.profile?.userId || other?.profile?.username || other?.userId || other?.username || "");
     return existing === userId;
   });
 }
@@ -52,9 +47,7 @@ async function findUidByUserId(db, identifier) {
   const users = (await db.ref("users").get()).val() || {};
   const match = Object.entries(users).find(([uid, value]) => {
     const profile = value?.profile || {};
-    const current = normalizeUserId(
-      profile.userId || profile.username || value?.userId || value?.username,
-    );
+    const current = normalizeUserId(profile.userId || profile.username || value?.userId || value?.username);
     return current === cleanId || String(uid) === cleanId;
   });
   return match ? String(match[0]) : "";
@@ -100,8 +93,7 @@ export function createAccountClaimRouter({ db, requireUser }) {
     const name = String(req.body?.name || "")
       .trim()
       .slice(0, 120);
-    const accountType =
-      String(req.body?.accountType || "public") === "private" ? "private" : "public";
+    const accountType = String(req.body?.accountType || "public") === "private" ? "private" : "public";
 
     if (!uid) return res.status(400).json({ ok: false, error: "User is required." });
     if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
@@ -164,9 +156,7 @@ export function createAccountClaimRouter({ db, requireUser }) {
 
       const verify = (await db.ref(`users/${uid}/profile`).get()).val() || {};
       if (normalizeUserId(verify.userId || verify.username) !== userId) {
-        await claimRef.transaction((current) =>
-          String(current?.uid || "") === uid ? null : current,
-        );
+        await claimRef.transaction((current) => (String(current?.uid || "") === uid ? null : current));
         return res.status(500).json({
           ok: false,
           error: "Could not verify the Indo profile write.",
@@ -211,17 +201,13 @@ export function createAccountClaimRouter({ db, requireUser }) {
       const users = Object.entries(snapshot.val() || {})
         .map(([uid, value]) => {
           const profile = value?.profile || {};
-          const userId = normalizeUserId(
-            profile.userId || profile.username || value?.userId || value?.username,
-          );
+          const userId = normalizeUserId(profile.userId || profile.username || value?.userId || value?.username);
           if (!userId || !userId.startsWith(query)) return null;
           return {
             uid,
             userId: `@${userId}`,
             name: String(profile.name || value?.name || "Indo User"),
-            avatarUrl: String(
-              profile.avatarUrl || profile.photoURL || value?.avatarUrl || value?.photoURL || "",
-            ),
+            avatarUrl: String(profile.avatarUrl || profile.photoURL || value?.avatarUrl || value?.photoURL || ""),
             isVerified: Boolean(profile.isVerified || value?.isVerified),
             postsCount: Number(value?.stats?.postsCount ?? profile.postsCount ?? 0),
             followersCount: Number(value?.stats?.followersCount ?? profile.followersCount ?? 0),
@@ -298,10 +284,7 @@ export function createAccountClaimRouter({ db, requireUser }) {
       ...currentProfile,
       uid,
       userId: normalizeUserId(currentProfile.userId || current.userId || current.username),
-      username:
-        currentProfile.username ||
-        current.username ||
-        (currentProfile.userId ? `@${normalizeUserId(currentProfile.userId)}` : ""),
+      username: currentProfile.username || current.username || (currentProfile.userId ? `@${normalizeUserId(currentProfile.userId)}` : ""),
       name,
       displayName: name,
       bio: clean(req.body?.bio, 160),
@@ -311,17 +294,8 @@ export function createAccountClaimRouter({ db, requireUser }) {
       interests: clean(req.body?.interests, 240),
       language: clean(req.body?.language, 40),
       visibility: String(req.body?.visibility || "public") === "private" ? "private" : "public",
-      avatarUrl: clean(
-        req.body?.avatarUrl || currentProfile.avatarUrl || currentProfile.photoURL,
-        1200,
-      ),
-      photoURL: clean(
-        req.body?.photoURL ||
-          req.body?.avatarUrl ||
-          currentProfile.photoURL ||
-          currentProfile.avatarUrl,
-        1200,
-      ),
+      avatarUrl: clean(req.body?.avatarUrl || currentProfile.avatarUrl || currentProfile.photoURL, 1200),
+      photoURL: clean(req.body?.photoURL || req.body?.avatarUrl || currentProfile.photoURL || currentProfile.avatarUrl, 1200),
       updatedAt: Date.now(),
     };
 

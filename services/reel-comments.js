@@ -5,9 +5,7 @@ export async function listComments({ db, reelId, limit = 50 }) {
     .ref(`reelComments/${reelId}`)
     .limitToLast(Math.min(100, Math.max(1, limit)))
     .get();
-  return Object.values(snapshot.val() || {}).sort(
-    (a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0),
-  );
+  return Object.values(snapshot.val() || {}).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
 }
 
 export async function addComment({ db, reelId, uid, text, profile }) {

@@ -10,18 +10,12 @@ function initFirebase() {
   if (!clientEmail || !privateKey) return null;
   return admin.initializeApp({
     credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
-    databaseURL:
-      process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
+    databaseURL: process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
   });
 }
 
 const firebaseApp = initFirebase();
-const db = firebaseApp
-  ? getDatabaseWithUrl(
-      process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
-      firebaseApp,
-    )
-  : null;
+const db = firebaseApp ? getDatabaseWithUrl(process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com", firebaseApp) : null;
 const auth = firebaseApp ? admin.auth(firebaseApp) : null;
 
 function normalizeUserId(value) {
@@ -82,21 +76,14 @@ if (originalPatch && db) {
         .trim()
         .slice(0, 160);
       if (!uid) return res.status(400).json({ ok: false, error: "User is required." });
-      if (!validUserId(userId))
-        return res.status(400).json({ ok: false, error: "Invalid User ID." });
+      if (!validUserId(userId)) return res.status(400).json({ ok: false, error: "Invalid User ID." });
       if (!name) return res.status(400).json({ ok: false, error: "User Name is required." });
       try {
         const usersSnapshot = await db.ref("users").get();
         const users = usersSnapshot.val() || {};
         for (const [otherUid, other] of Object.entries(users)) {
           if (String(otherUid) === uid) continue;
-          const otherId = normalizeUserId(
-            other?.profile?.userId ||
-              other?.profile?.username ||
-              other?.userId ||
-              other?.username ||
-              "",
-          );
+          const otherId = normalizeUserId(other?.profile?.userId || other?.profile?.username || other?.userId || other?.username || "");
           if (otherId && otherId === userId) {
             return res.status(409).json({ ok: false, error: `@${userId} is already taken.` });
           }
@@ -113,15 +100,7 @@ if (originalPatch && db) {
           name,
           displayName: name,
           bio,
-          accountType:
-            String(
-              req.body?.accountType ||
-                previousProfile.accountType ||
-                previous.accountType ||
-                "public",
-            ) === "private"
-              ? "private"
-              : "public",
+          accountType: String(req.body?.accountType || previousProfile.accountType || previous.accountType || "public") === "private" ? "private" : "public",
           updatedAt: Date.now(),
         };
         const profilePrivate = {

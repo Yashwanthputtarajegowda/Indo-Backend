@@ -10,19 +10,12 @@ function hours(seconds) {
 }
 
 async function calculateSummary({ db, uid }) {
-  const [userSnapshot, videosSnapshot] = await Promise.all([
-    db.ref(`users/${uid}`).get(),
-    db.ref("videos").orderByChild("ownerUid").equalTo(uid).get(),
-  ]);
+  const [userSnapshot, videosSnapshot] = await Promise.all([db.ref(`users/${uid}`).get(), db.ref("videos").orderByChild("ownerUid").equalTo(uid).get()]);
 
   const user = userSnapshot.val() || {};
   const videos = Object.values(videosSnapshot.val() || {});
-  const videoViews = videos
-    .filter((item) => (item.mediaType || "video") === "video")
-    .reduce((sum, item) => sum + asNumber(item.views), 0);
-  const reelViews = videos
-    .filter((item) => item.mediaType === "reel")
-    .reduce((sum, item) => sum + asNumber(item.views), 0);
+  const videoViews = videos.filter((item) => (item.mediaType || "video") === "video").reduce((sum, item) => sum + asNumber(item.views), 0);
+  const reelViews = videos.filter((item) => item.mediaType === "reel").reduce((sum, item) => sum + asNumber(item.views), 0);
   const videoWatchSeconds = asNumber(user.earnings?.videoWatchSeconds);
   const reelWatchSeconds = asNumber(user.earnings?.reelWatchSeconds);
   const videoWatchHours = hours(videoWatchSeconds);
@@ -119,9 +112,7 @@ export function createEarningsRouter({ db, requireUser }) {
           reelWatchHours: summary.reelWatchHours,
         });
       }
-      await db
-        .ref(`users/${user.uid}/earnings`)
-        .update({ enabled, enabledAt: enabled ? Date.now() : null });
+      await db.ref(`users/${user.uid}/earnings`).update({ enabled, enabledAt: enabled ? Date.now() : null });
       return res.json({ ok: true, enabled });
     } catch (error) {
       return res.status(500).json({
@@ -149,17 +140,14 @@ export function createEarningsRouter({ db, requireUser }) {
     const seconds = Math.min(15, requestedSeconds);
     try {
       const mediaSnapshot = await db.ref(`videos/${mediaId}`).get();
-      if (!mediaSnapshot.exists())
-        return res.status(404).json({ ok: false, error: "Media not found." });
+      if (!mediaSnapshot.exists()) return res.status(404).json({ ok: false, error: "Media not found." });
       const media = mediaSnapshot.val() || {};
       if (media.ownerUid === user.uid) return res.json({ ok: true, counted: false, seconds: 0 });
 
       const type = media.mediaType === "reel" ? "reel" : "video";
       const counterPath = `users/${media.ownerUid}/earnings/${type}WatchSeconds`;
       const viewerPath = `users/${media.ownerUid}/earnings/watchers/${user.uid}/${type}/${mediaId}`;
-      const counter = await db
-        .ref(counterPath)
-        .transaction((current) => asNumber(current) + seconds);
+      const counter = await db.ref(counterPath).transaction((current) => asNumber(current) + seconds);
       await db.ref(viewerPath).transaction((current) => asNumber(current) + seconds);
       return res.json({
         ok: true,

@@ -26,10 +26,7 @@ export async function getOptionalRequester(req, requireUser) {
 
 export async function isBlockedEitherWay({ db, requesterUid, ownerUid }) {
   if (!requesterUid || !ownerUid || requesterUid === ownerUid) return false;
-  const [requesterBlocked, ownerBlocked] = await Promise.all([
-    db.ref(`users/${requesterUid}/blocked/${ownerUid}`).get(),
-    db.ref(`users/${ownerUid}/blocked/${requesterUid}`).get(),
-  ]);
+  const [requesterBlocked, ownerBlocked] = await Promise.all([db.ref(`users/${requesterUid}/blocked/${ownerUid}`).get(), db.ref(`users/${ownerUid}/blocked/${requesterUid}`).get()]);
   return requesterBlocked.exists() || ownerBlocked.exists();
 }
 
@@ -132,9 +129,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
       });
     try {
       const snapshot = await db.ref(`users/${user.uid}/blocked`).get();
-      const users = Object.values(snapshot.val() || {}).sort((a, b) =>
-        String(a.username || "").localeCompare(String(b.username || "")),
-      );
+      const users = Object.values(snapshot.val() || {}).sort((a, b) => String(a.username || "").localeCompare(String(b.username || "")));
       return res.json({ ok: true, users });
     } catch (error) {
       return res.status(500).json({
@@ -155,13 +150,11 @@ export function createSocialBlockRouter({ db, requireUser }) {
     const targetUid = clean(req.body?.targetUid);
     const blocked = req.body?.blocked === true;
     if (!targetUid) return res.status(400).json({ ok: false, error: "Target user is required." });
-    if (targetUid === user.uid)
-      return res.status(400).json({ ok: false, error: "You cannot block your own account." });
+    if (targetUid === user.uid) return res.status(400).json({ ok: false, error: "You cannot block your own account." });
 
     try {
       const targetSnapshot = await db.ref(`users/${targetUid}`).get();
-      if (!targetSnapshot.exists())
-        return res.status(404).json({ ok: false, error: "Target profile not found." });
+      if (!targetSnapshot.exists()) return res.status(404).json({ ok: false, error: "Target profile not found." });
 
       const target = targetSnapshot.val() || {};
       const blockPath = `users/${user.uid}/blocked/${targetUid}`;
@@ -199,10 +192,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
         error: "Firebase Admin is not configured on the backend.",
       });
     try {
-      const [incomingSnapshot, outgoingSnapshot] = await Promise.all([
-        db.ref(`users/${user.uid}/followRequests`).get(),
-        db.ref(`users/${user.uid}/sentFollowRequests`).get(),
-      ]);
+      const [incomingSnapshot, outgoingSnapshot] = await Promise.all([db.ref(`users/${user.uid}/followRequests`).get(), db.ref(`users/${user.uid}/sentFollowRequests`).get()]);
       return res.json({
         ok: true,
         incoming: Object.values(incomingSnapshot.val() || {}),
@@ -270,16 +260,14 @@ export function createSocialBlockRouter({ db, requireUser }) {
           visible.push(story);
           continue;
         }
-        if (!profileCache.has(ownerUid))
-          profileCache.set(ownerUid, db.ref(`users/${ownerUid}`).get());
+        if (!profileCache.has(ownerUid)) profileCache.set(ownerUid, db.ref(`users/${ownerUid}`).get());
         const profile = (await profileCache.get(ownerUid)).val() || {};
         if ((profile.accountType || "public") !== "private") {
           visible.push(story);
           continue;
         }
         const key = `${ownerUid}:${requester.uid}`;
-        if (!followerCache.has(key))
-          followerCache.set(key, db.ref(`users/${ownerUid}/followers/${requester.uid}`).get());
+        if (!followerCache.has(key)) followerCache.set(key, db.ref(`users/${ownerUid}/followers/${requester.uid}`).get());
         if ((await followerCache.get(key)).exists()) visible.push(story);
       }
 
@@ -297,15 +285,10 @@ export function createSocialBlockRouter({ db, requireUser }) {
       .trim()
       .toLowerCase();
     try {
-      const requester = (req.headers.authorization || "").startsWith("Bearer ")
-        ? await getOptionalRequester(req, requireUser)
-        : null;
+      const requester = (req.headers.authorization || "").startsWith("Bearer ") ? await getOptionalRequester(req, requireUser) : null;
       const snapshot = await db.ref("videos").orderByChild("createdAt").limitToLast(100).get();
       const allVideos = Object.values(snapshot.val() || {});
-      const candidates =
-        type === "video" || type === "reel"
-          ? allVideos.filter((item) => (item.mediaType || "video") === type)
-          : allVideos;
+      const candidates = type === "video" || type === "reel" ? allVideos.filter((item) => (item.mediaType || "video") === type) : allVideos;
       const profileCache = new Map();
       const followerCache = new Map();
       const visible = [];
@@ -313,8 +296,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
 
       if (requester?.uid) {
         const followingSnapshot = await db.ref(`users/${requester.uid}/following`).get();
-        for (const uid of Object.keys(followingSnapshot.val() || {}))
-          followingUids.add(String(uid));
+        for (const uid of Object.keys(followingSnapshot.val() || {})) followingUids.add(String(uid));
       }
 
       for (const video of candidates) {
@@ -328,8 +310,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
           })
         )
           continue;
-        if (!profileCache.has(ownerUid))
-          profileCache.set(ownerUid, db.ref(`users/${ownerUid}`).get());
+        if (!profileCache.has(ownerUid)) profileCache.set(ownerUid, db.ref(`users/${ownerUid}`).get());
         const profile = (await profileCache.get(ownerUid)).val() || {};
         if ((profile.accountType || "public") !== "private") {
           visible.push(video);
@@ -341,8 +322,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
           continue;
         }
         const key = `${ownerUid}:${requester.uid}`;
-        if (!followerCache.has(key))
-          followerCache.set(key, db.ref(`users/${ownerUid}/followers/${requester.uid}`).get());
+        if (!followerCache.has(key)) followerCache.set(key, db.ref(`users/${ownerUid}/followers/${requester.uid}`).get());
         if ((await followerCache.get(key)).exists()) visible.push(video);
       }
 
@@ -367,9 +347,7 @@ export function createSocialBlockRouter({ db, requireUser }) {
       if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Video not found." });
       const video = snapshot.val() || {};
       if (!(await canAccessMedia({ db, requireUser, req, res, media: video }))) return;
-      const result = await videoRef
-        .child("views")
-        .transaction((current) => (Number(current) || 0) + 1);
+      const result = await videoRef.child("views").transaction((current) => (Number(current) || 0) + 1);
       return res.json({
         ok: true,
         videoId,

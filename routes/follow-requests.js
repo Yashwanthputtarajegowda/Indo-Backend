@@ -1,9 +1,5 @@
 import express from "express";
-import {
-  respondToFollowRequest,
-  toggleFollow,
-  getFollowStatus,
-} from "../services/social-follow.js";
+import { respondToFollowRequest, toggleFollow, getFollowStatus } from "../services/social-follow.js";
 import { syncCanonicalUser } from "../services/user-canonical.js";
 
 function entryList(snapshot) {
@@ -23,13 +19,7 @@ async function resolveTargetUid(db, rawTarget) {
   const direct = await db.ref(`users/${value}`).get();
   if (direct.exists()) return value;
   const normalized = value.toLowerCase().replace(/^@/, "");
-  const encoded = normalized
-    .replace(/\./g, "%2E")
-    .replace(/#/g, "%23")
-    .replace(/\$/g, "%24")
-    .replace(/\//g, "%2F")
-    .replace(/\[/g, "%5B")
-    .replace(/\]/g, "%5D");
+  const encoded = normalized.replace(/\./g, "%2E").replace(/#/g, "%23").replace(/\$/g, "%24").replace(/\//g, "%2F").replace(/\[/g, "%5B").replace(/\]/g, "%5D");
   const claim = await db.ref(`usernames/${encoded}`).get();
   return String(claim.val()?.uid || "");
 }
@@ -46,10 +36,7 @@ export function createFollowRequestsRouter({ db, requireUser }) {
         error: "Firebase Admin is not configured on the backend.",
       });
     try {
-      const [incomingSnapshot, outgoingSnapshot] = await Promise.all([
-        db.ref(`users/${user.uid}/followRequests`).get(),
-        db.ref(`users/${user.uid}/sentFollowRequests`).get(),
-      ]);
+      const [incomingSnapshot, outgoingSnapshot] = await Promise.all([db.ref(`users/${user.uid}/followRequests`).get(), db.ref(`users/${user.uid}/sentFollowRequests`).get()]);
       return res.json({
         ok: true,
         incoming: Object.values(incomingSnapshot.val() || {}),
@@ -205,17 +192,14 @@ export function createFollowRequestsRouter({ db, requireUser }) {
       });
       if (String(user.uid) !== targetUid && canonical.settings.accountType === "private") {
         const follower = await db.ref(`users/${targetUid}/social/followers/${user.uid}`).get();
-        const legacyFollower = follower.exists()
-          ? follower
-          : await db.ref(`users/${targetUid}/followers/${user.uid}`).get();
+        const legacyFollower = follower.exists() ? follower : await db.ref(`users/${targetUid}/followers/${user.uid}`).get();
         if (!legacyFollower.exists())
           return res.status(403).json({
             ok: false,
             error: "Follow this private account to view its followers/following.",
           });
       }
-      const relationItems =
-        relation === "followers" ? canonical.social.followers : canonical.social.following;
+      const relationItems = relation === "followers" ? canonical.social.followers : canonical.social.following;
       const items = entryList({ val: () => relationItems });
       return res.json({
         ok: true,

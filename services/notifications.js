@@ -1,13 +1,4 @@
-export async function createNotification({
-  db,
-  recipientUid,
-  type,
-  actorUid,
-  actorName = "",
-  actorUserId = "",
-  text = "",
-  targetId = "",
-}) {
+export async function createNotification({ db, recipientUid, type, actorUid, actorName = "", actorUserId = "", text = "", targetId = "" }) {
   if (!recipientUid || !type || !actorUid || actorUid === recipientUid) return null;
   const notificationRef = db.ref(`notifications/${recipientUid}`).push();
   const notification = {

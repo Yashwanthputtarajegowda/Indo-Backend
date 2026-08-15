@@ -1,11 +1,7 @@
 import express from "express";
 import { createNotification } from "../services/notifications.js";
 import { canAccessMedia } from "./social-block.js";
-import {
-  setCanonicalVideoEngagement,
-  saveCanonicalComment,
-  updateCanonicalVideoViews,
-} from "../services/canonical-content.js";
+import { setCanonicalVideoEngagement, saveCanonicalComment, updateCanonicalVideoViews } from "../services/canonical-content.js";
 
 function safeText(value, max = 500) {
   return String(value || "")
@@ -63,8 +59,7 @@ export function createCanonicalMediaEngagementRouter({ db, requireUser }) {
             updatedAt: Date.now(),
           };
           await db.ref(`videos/${videoId}`).update(metadata);
-          if (payload.video && typeof payload.video === "object")
-            payload.video = { ...payload.video, ...metadata };
+          if (payload.video && typeof payload.video === "object") payload.video = { ...payload.video, ...metadata };
         }
       } catch (error) {
         console.warn("Video metadata persistence failed:", error?.message || error);
@@ -126,12 +121,8 @@ export function createCanonicalMediaEngagementRouter({ db, requireUser }) {
 
   // One authenticated user gets at most one counted view for a media item.
   // Both routes are kept so older and newer frontend surfaces share the same rule.
-  router.post("/media/:mediaId/view", (req, res) =>
-    handleUniqueView(req, res, safeText(req.params.mediaId, 120)),
-  );
-  router.post("/media/videos/:videoId/view", (req, res) =>
-    handleUniqueView(req, res, safeText(req.params.videoId, 120)),
-  );
+  router.post("/media/:mediaId/view", (req, res) => handleUniqueView(req, res, safeText(req.params.mediaId, 120)));
+  router.post("/media/videos/:videoId/view", (req, res) => handleUniqueView(req, res, safeText(req.params.videoId, 120)));
 
   router.post("/media/:mediaId/like", async (req, res) => {
     const user = await requireUser(req, res);
@@ -196,18 +187,13 @@ export function createCanonicalMediaEngagementRouter({ db, requireUser }) {
     try {
       const media = await loadMedia(req, res, mediaId);
       if (!media) return;
-      const [likeSnapshot, saveSnapshot, viewSnapshot, canonicalLike, canonicalSave] =
-        await Promise.all([
-          db.ref(`videoLikes/${mediaId}/${user.uid}`).get(),
-          db.ref(`videoSaves/${mediaId}/${user.uid}`).get(),
-          db.ref(`videoViews/${mediaId}/${user.uid}`).get(),
-          media.ownerUid
-            ? db.ref(`users/${media.ownerUid}/engagement/videos/${mediaId}/likes/${user.uid}`).get()
-            : null,
-          media.ownerUid
-            ? db.ref(`users/${media.ownerUid}/engagement/videos/${mediaId}/saves/${user.uid}`).get()
-            : null,
-        ]);
+      const [likeSnapshot, saveSnapshot, viewSnapshot, canonicalLike, canonicalSave] = await Promise.all([
+        db.ref(`videoLikes/${mediaId}/${user.uid}`).get(),
+        db.ref(`videoSaves/${mediaId}/${user.uid}`).get(),
+        db.ref(`videoViews/${mediaId}/${user.uid}`).get(),
+        media.ownerUid ? db.ref(`users/${media.ownerUid}/engagement/videos/${mediaId}/likes/${user.uid}`).get() : null,
+        media.ownerUid ? db.ref(`users/${media.ownerUid}/engagement/videos/${mediaId}/saves/${user.uid}`).get() : null,
+      ]);
       return res.json({
         ok: true,
         likes: Number(media.likes || 0),
@@ -259,8 +245,7 @@ export function createCanonicalMediaEngagementRouter({ db, requireUser }) {
     try {
       const media = await loadMedia(req, res, mediaId);
       if (!media) return;
-      if (media.allowComments === false)
-        return res.status(403).json({ ok: false, error: "Comments are disabled for this video." });
+      if (media.allowComments === false) return res.status(403).json({ ok: false, error: "Comments are disabled for this video." });
       const profile = (await db.ref(`users/${user.uid}`).get()).val() || {};
       const ref = db.ref(`videoComments/${mediaId}`).push();
       const comment = {
@@ -304,18 +289,9 @@ export function createCanonicalMediaEngagementRouter({ db, requireUser }) {
     try {
       const media = await loadMedia(req, res, mediaId);
       if (!media) return;
-      const canonicalSnapshot = media.ownerUid
-        ? await db
-            .ref(`users/${media.ownerUid}/engagement/videos/${mediaId}/comments`)
-            .limitToLast(100)
-            .get()
-        : null;
-      const snapshot = canonicalSnapshot?.exists()
-        ? canonicalSnapshot
-        : await db.ref(`videoComments/${mediaId}`).limitToLast(100).get();
-      const comments = Object.values(snapshot.val() || {}).sort(
-        (a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0),
-      );
+      const canonicalSnapshot = media.ownerUid ? await db.ref(`users/${media.ownerUid}/engagement/videos/${mediaId}/comments`).limitToLast(100).get() : null;
+      const snapshot = canonicalSnapshot?.exists() ? canonicalSnapshot : await db.ref(`videoComments/${mediaId}`).limitToLast(100).get();
+      const comments = Object.values(snapshot.val() || {}).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
       return res.json({ ok: true, comments });
     } catch (error) {
       return res.status(500).json({

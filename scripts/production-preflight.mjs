@@ -11,8 +11,7 @@ const required = [
 
 const missing = required.filter((key) => !String(process.env[key] || "").trim());
 const cors = String(process.env.CORS_ORIGINS || "");
-const localhostOnly =
-  cors && cors.split(",").every((origin) => /localhost|127\.0\.0\.1/.test(origin.trim()));
+const localhostOnly = cors && cors.split(",").every((origin) => /localhost|127\.0\.0\.1/.test(origin.trim()));
 
 if (missing.length) {
   console.error(`Missing production environment variables: ${missing.join(", ")}`);
@@ -20,9 +19,7 @@ if (missing.length) {
 }
 
 if (localhostOnly) {
-  console.error(
-    "CORS_ORIGINS only contains localhost/127.0.0.1; configure the production frontend origin.",
-  );
+  console.error("CORS_ORIGINS only contains localhost/127.0.0.1; configure the production frontend origin.");
   process.exit(1);
 }
 

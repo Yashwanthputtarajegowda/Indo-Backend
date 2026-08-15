@@ -67,9 +67,7 @@ export function createMessagesRouter({ db, requireUser }) {
       if (!context) return;
       const id = conversationId(context.user.uid, context.targetUid);
       const snapshot = await db.ref(`messages/${id}`).limitToLast(200).get();
-      const messages = Object.values(snapshot.val() || {}).sort(
-        (a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0),
-      );
+      const messages = Object.values(snapshot.val() || {}).sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
       return res.json({
         ok: true,
         conversationId: id,
@@ -121,14 +119,7 @@ export function createMessagesRouter({ db, requireUser }) {
         name: sender?.name || "Indo User",
         lastMessage: text,
         lastMessageAt: message.createdAt,
-        unreadCount:
-          Number(
-            (
-              await db
-                .ref(`conversations/${context.targetUid}/${context.user.uid}/unreadCount`)
-                .get()
-            ).val() || 0,
-          ) + 1,
+        unreadCount: Number((await db.ref(`conversations/${context.targetUid}/${context.user.uid}/unreadCount`).get()).val() || 0) + 1,
       });
 
       await createNotification({
@@ -176,9 +167,7 @@ export function createMessagesRouter({ db, requireUser }) {
     }
     try {
       const snapshot = await db.ref(`conversations/${user.uid}`).get();
-      const conversations = Object.values(snapshot.val() || {}).sort(
-        (a, b) => Number(b.lastMessageAt || 0) - Number(a.lastMessageAt || 0),
-      );
+      const conversations = Object.values(snapshot.val() || {}).sort((a, b) => Number(b.lastMessageAt || 0) - Number(a.lastMessageAt || 0));
       return res.json({ ok: true, conversations });
     } catch (error) {
       return res.status(500).json({

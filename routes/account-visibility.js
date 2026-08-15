@@ -31,8 +31,7 @@ async function saveCanonicalProfile({ req, res, db, requireUser }) {
     }
 
     const previous = snapshot.val() || {};
-    const previousProfile =
-      previous.profile && typeof previous.profile === "object" ? previous.profile : {};
+    const previousProfile = previous.profile && typeof previous.profile === "object" ? previous.profile : {};
     const now = Date.now();
 
     const profile = {
@@ -43,24 +42,10 @@ async function saveCanonicalProfile({ req, res, db, requireUser }) {
       bio: cleanText(req.body?.bio ?? previousProfile.bio ?? previous.bio, 160),
       location: cleanText(req.body?.location ?? previousProfile.location ?? previous.location, 100),
       website: cleanText(req.body?.website ?? previousProfile.website ?? previous.website, 200),
-      role: cleanText(
-        req.body?.role ?? previousProfile.role ?? previous.role ?? "Content Creator",
-        60,
-      ),
-      interests: cleanText(
-        req.body?.interests ?? previousProfile.interests ?? previous.interests,
-        240,
-      ),
-      language: cleanText(
-        req.body?.language ?? previousProfile.language ?? previous.language ?? "English",
-        40,
-      ),
-      accountType:
-        req.body?.visibility === "private"
-          ? "private"
-          : req.body?.visibility === "public"
-            ? "public"
-            : previousProfile.accountType || previous.accountType || "public",
+      role: cleanText(req.body?.role ?? previousProfile.role ?? previous.role ?? "Content Creator", 60),
+      interests: cleanText(req.body?.interests ?? previousProfile.interests ?? previous.interests, 240),
+      language: cleanText(req.body?.language ?? previousProfile.language ?? previous.language ?? "English", 40),
+      accountType: req.body?.visibility === "private" ? "private" : req.body?.visibility === "public" ? "public" : previousProfile.accountType || previous.accountType || "public",
       updatedAt: now,
     };
 
@@ -114,8 +99,7 @@ export function createAccountVisibilityRouter({ db, requireUser }) {
     try {
       const userRef = db.ref(`users/${user.uid}`);
       const snapshot = await userRef.get();
-      if (!snapshot.exists())
-        return res.status(404).json({ ok: false, error: "Profile not found." });
+      if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Profile not found." });
       await userRef.update({ accountType, visibilityUpdatedAt: Date.now() });
       return res.json({ ok: true, accountType });
     } catch (error) {

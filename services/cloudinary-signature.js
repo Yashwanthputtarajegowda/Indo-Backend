@@ -43,10 +43,7 @@ export async function destroyCloudinaryVideo(publicId) {
     resource_type: resourceType,
     type,
   });
-  const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/${resourceType}/destroy`,
-    { method: "POST", body },
-  );
+  const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/${resourceType}/destroy`, { method: "POST", body });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.result === "error") {
     throw new Error(data.error?.message || `Cloudinary ${resourceType} deletion failed.`);
@@ -58,13 +55,8 @@ export async function cloudinaryAssetExists(publicId) {
   const id = String(publicId || "").trim();
   if (!id) return false;
   const { cloudName, apiKey } = getCloudinaryConfig();
-  const token = Buffer.from(`${apiKey}:${process.env.CLOUDINARY_API_SECRET || ""}`).toString(
-    "base64",
-  );
-  const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/resources/video/upload/${encodeURIComponent(id)}`,
-    { headers: { Authorization: `Basic ${token}` } },
-  );
+  const token = Buffer.from(`${apiKey}:${process.env.CLOUDINARY_API_SECRET || ""}`).toString("base64");
+  const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/resources/video/upload/${encodeURIComponent(id)}`, { headers: { Authorization: `Basic ${token}` } });
   if (response.status === 404) return false;
   if (!response.ok) throw new Error(`Cloudinary asset lookup failed (${response.status}).`);
   return true;

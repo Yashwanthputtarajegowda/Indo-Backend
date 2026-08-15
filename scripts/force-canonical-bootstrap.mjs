@@ -11,18 +11,12 @@ function initFirebase() {
   if (!clientEmail || !privateKey) return null;
   return admin.initializeApp({
     credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
-    databaseURL:
-      process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
+    databaseURL: process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
   });
 }
 
 const app = initFirebase();
-const db = app
-  ? getDatabaseWithUrl(
-      process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com",
-      app,
-    )
-  : null;
+const db = app ? getDatabaseWithUrl(process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com", app) : null;
 
 if (!app || !db) {
   console.error("[canonical-migration] Firebase Admin credentials are missing; migration skipped.");
@@ -46,8 +40,7 @@ express.application.post = function patchedPost(path, ...handlers) {
   const saveStory = async (req, res) => {
     if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
     const header = req.headers.authorization || "";
-    if (!header.startsWith("Bearer "))
-      return res.status(401).json({ ok: false, error: "Authentication required." });
+    if (!header.startsWith("Bearer ")) return res.status(401).json({ ok: false, error: "Authentication required." });
     let user;
     try {
       user = await admin.auth(app).verifyIdToken(header.slice(7));
@@ -65,16 +58,8 @@ express.application.post = function patchedPost(path, ...handlers) {
       const userSnapshot = await db.ref(`users/${user.uid}`).get();
       const userData = userSnapshot.val() || {};
       const profile = userData.profile || {};
-      const username = String(
-        profile.username ||
-          userData.username ||
-          userData.userId ||
-          user.email?.split("@")[0] ||
-          "User",
-      );
-      const name = String(
-        profile.name || userData.name || user.displayName || username || "Indo User",
-      );
+      const username = String(profile.username || userData.username || userData.userId || user.email?.split("@")[0] || "User");
+      const name = String(profile.name || userData.name || user.displayName || username || "Indo User");
       const ref = db.ref("stories").push();
       const story = {
         id: ref.key,
@@ -98,9 +83,7 @@ express.application.post = function patchedPost(path, ...handlers) {
         [`stories/${ref.key}`]: story,
         [`users/${user.uid}/content/stories/${ref.key}`]: story,
       });
-      await db
-        .ref(`users/${user.uid}/stats/storiesCount`)
-        .transaction((current) => (Number(current) || 0) + 1);
+      await db.ref(`users/${user.uid}/stats/storiesCount`).transaction((current) => (Number(current) || 0) + 1);
       console.log(`[story-save] saved ${ref.key} for ${user.uid}`);
       return res.status(201).json({ ok: true, story });
     } catch (error) {
