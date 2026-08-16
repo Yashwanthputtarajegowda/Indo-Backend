@@ -1,21 +1,23 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 
-const BUCKET = String(process.env.B2_BUCKET_NAME || "").trim();
-const ENDPOINT = String(process.env.B2_ENDPOINT || "").trim();
+// Indo's B2 bucket and S3 endpoint are intentionally fixed here so an old
+// Railway variable cannot redirect media requests to a different bucket.
+const BUCKET = "indo-media";
+const ENDPOINT = "https://s3.eu-central-003.backblazeb2.com";
 const KEY_ID = String(process.env.B2_KEY_ID || "").trim();
 const APPLICATION_KEY = String(process.env.B2_APPLICATION_KEY || "").trim();
 
 let client = null;
 
 export function b2StorageConfigured() {
-  return Boolean(BUCKET && ENDPOINT && KEY_ID && APPLICATION_KEY);
+  return Boolean(KEY_ID && APPLICATION_KEY);
 }
 
 function getClient() {
   if (!b2StorageConfigured()) throw new Error("Backblaze B2 is not configured.");
   if (!client) {
     client = new S3Client({
-      region: String(process.env.B2_REGION || "eu-central-003").trim(),
+      region: "eu-central-003",
       endpoint: ENDPOINT,
       forcePathStyle: true,
       credentials: {
@@ -38,7 +40,9 @@ export async function uploadVideoBuffer({ buffer, key, contentType = "video/mp4"
     Body: buffer,
     ContentType: contentType,
     Metadata: Object.fromEntries(
-      Object.entries(metadata).map(([name, value]) => [String(name), String(value ?? "")]).filter(([, value]) => value),
+      Object.entries(metadata)
+        .map(([name, value]) => [String(name), String(value ?? "")])
+        .filter(([, value]) => value),
     ),
   }));
 
