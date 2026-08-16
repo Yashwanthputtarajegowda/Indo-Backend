@@ -12,7 +12,7 @@ function buildBotPool() {
     const numberedToken = env(`TELEGRAM_BOT_TOKEN_${index}`);
     const numberedChat = env(`TELEGRAM_CHAT_ID_${index}`);
     const token = numberedToken || (index === 1 ? env("TELEGRAM_BOT_TOKEN") : "");
-    const chatId = numberedChat || (index === 1 ? env("TELEGRAM_CHAT_ID") : "");
+    const chatId = numberedChat || env("TELEGRAM_CHAT_ID");
     if (token && chatId) bots.push({ key: `bot-${index}`, index, token, chatId });
   }
   return bots;
