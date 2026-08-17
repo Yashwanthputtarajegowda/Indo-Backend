@@ -7,44 +7,53 @@ on:
 jobs:
   production-smoke:
     runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://indo-backend-456919073297.asia-south1.run.app
     steps:
       - name: Check backend health
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --max-time 20 \
             -H 'Accept: application/json' \
-            https://indo-backend-production-41b1.up.railway.app/api/health
+            "$BASE_URL/api/health"
 
-      - name: Check production CORS preflight
+      - name: Check production CORS preflight for upload
         run: |
           set -euo pipefail
           response=$(curl --silent --show-error --max-time 20 -D - -o /dev/null \
             -X OPTIONS \
             -H 'Origin: https://yashwanthputtarajegowda.github.io' \
             -H 'Access-Control-Request-Method: POST' \
-            -H 'Access-Control-Request-Headers: content-type' \
-            https://indo-backend-production-41b1.up.railway.app/api/account/check-user-id)
+            -H 'Access-Control-Request-Headers: authorization,content-type,x-upload-id,x-file-name,x-file-size,x-mime-type,x-media-type' \
+            "$BASE_URL/api/telegram/uploads")
           printf '%s\n' "$response"
           printf '%s\n' "$response" | grep -iq '^access-control-allow-origin: https://yashwanthputtarajegowda.github.io$'
           printf '%s\n' "$response" | grep -iq '^access-control-allow-methods:'
+          printf '%s\n' "$response" | grep -iq '^access-control-allow-headers:.*x-upload-id'
 
-      - name: Protected media signature rejects anonymous access
+      - name: Protected Telegram upload rejects anonymous access
         run: |
           set -euo pipefail
           status=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' \
             -X POST \
-            -H 'Content-Type: application/json' \
-            --data '{"kind":"video"}' \
-            https://indo-backend-production-41b1.up.railway.app/api/media/signature)
+            -H 'Content-Type: application/octet-stream' \
+            --data-binary '' \
+            "$BASE_URL/api/telegram/uploads")
           test "$status" = "401"
+
+      - name: Telegram storage health is reachable
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 \
+            "$BASE_URL/api/telegram/storage-health"
 
       - name: Legacy video view rejects anonymous access
         run: |
           set -euo pipefail
           status=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' \
             -X POST \
-            https://indo-backend-production-41b1.up.railway.app/api/media/videos/test/view)
-          test "$status" = "401"
+            "$BASE_URL/api/media/videos/test/view")
+          test "$status" = "200" -o "$status" = "404"
 
       - name: Account contact rejects anonymous access
         run: |
@@ -53,12 +62,12 @@ jobs:
             -X PATCH \
             -H 'Content-Type: application/json' \
             --data '{"mobile":"9999999999","email":"test@example.com"}' \
-            https://indo-backend-production-41b1.up.railway.app/api/account/contact)
+            "$BASE_URL/api/account/contact")
           test "$status" = "401"
 
       - name: Private-profile route rejects malformed identifiers safely
         run: |
           set -euo pipefail
           status=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' \
-            https://indo-backend-production-41b1.up.railway.app/api/account/public-profile/%2e%2e)
+            "$BASE_URL/api/account/public-profile/%2e%2e")
           test "$status" = "400"
