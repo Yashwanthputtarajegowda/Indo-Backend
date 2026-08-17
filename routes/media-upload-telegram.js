@@ -18,7 +18,7 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
 
   router.post(
     "/media/videos/upload-telegram",
-    express.raw({ type: /^video\/.+$/i, limit: "50mb" }),
+    express.raw({ type: (req) => /^video\/.+$/i.test(String(req.headers["content-type"] || "")) || String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase() === "application/octet-stream", limit: "50mb" }),
     async (req, res) => {
       const user = await requireUser(req, res);
       if (!user) return;
@@ -35,24 +35,24 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
         return res.status(413).json({ ok: false, error: "This upload is larger than the current Telegram Bot API limit." });
       }
 
-      const mediaType = String(req.query.mediaType || "video").trim().toLowerCase() === "reel" ? "reel" : "video";
-      const title = safeText(req.query.title, 120) || (mediaType === "reel" ? "Untitled reel" : "Untitled video");
-      const caption = safeText(req.query.caption, 500);
-      const privacy = ["public", "followers", "private"].includes(String(req.query.privacy || "public"))
-        ? String(req.query.privacy || "public")
+      const mediaType = String(req.query.mediaType || req.headers["x-media-type"] || "video").trim().toLowerCase() === "reel" ? "reel" : "video";
+      const title = safeText(req.query.title || req.headers["x-title"], 120) || (mediaType === "reel" ? "Untitled reel" : "Untitled video");
+      const caption = safeText(req.query.caption || req.headers["x-caption"], 500);
+      const privacy = ["public", "followers", "private"].includes(String(req.query.privacy || req.headers["x-privacy"] || "public"))
+        ? String(req.query.privacy || req.headers["x-privacy"] || "public")
         : "public";
-      const allowComments = parseBool(req.query.allowComments, true);
-      const allowDuet = parseBool(req.query.allowDuet, true);
-      const category = safeText(req.query.category, 60);
-      const location = safeText(req.query.location, 120);
-      const tags = String(req.query.tags || "")
+      const allowComments = parseBool(req.query.allowComments ?? req.headers["x-allow-comments"], true);
+      const allowDuet = parseBool(req.query.allowDuet ?? req.headers["x-allow-duet"], true);
+      const category = safeText(req.query.category || req.headers["x-category"], 60);
+      const location = safeText(req.query.location || req.headers["x-location"], 120);
+      const tags = String(req.query.tags || req.headers["x-tags"] || "")
         .split(",")
         .map((tag) => tag.trim().replace(/^#/, ""))
         .filter(Boolean)
         .slice(0, 20);
-      const duration = Math.max(0, Number(req.query.duration) || 0);
-      const width = Math.max(0, Number(req.query.width) || 0);
-      const height = Math.max(0, Number(req.query.height) || 0);
+      const duration = Math.max(0, Number(req.query.duration ?? req.headers["x-duration"]) || 0);
+      const width = Math.max(0, Number(req.query.width ?? req.headers["x-width"]) || 0);
+      const height = Math.max(0, Number(req.query.height ?? req.headers["x-height"]) || 0);
       const fileName = safeText(req.headers["x-file-name"], 140) || `${mediaType}-${Date.now()}.mp4`;
 
       try {
