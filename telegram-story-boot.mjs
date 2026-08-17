@@ -4,114 +4,23 @@ import { getDatabaseWithUrl } from "firebase-admin/database";
 
 const CHUNK_SIZE = 2 * 1024 * 1024;
 const MAX_BOTS = 50;
-const LEASE_STALE_MS = 10 * 60 * 1000;
 
 function env(name) { return String(process.env[name] || "").trim(); }
-function bots() {
-  const out = [];
-  for (let i = 1; i <= MAX_BOTS; i += 1) {
-    const token = env(`TELEGRAM_BOT_TOKEN_${i}`) || (i === 1 ? env("TELEGRAM_BOT_TOKEN") : "");
-    const chatId = env(`TELEGRAM_CHAT_ID_${i}`) || env("TELEGRAM_CHAT_ID");
-    if (token && chatId) out.push({ key: `bot-${i}`, index: i, token, chatId });
-  }
-  return out;
-}
-function safeId(v) { const s = String(v || "").trim(); return /^[A-Za-z0-9_-]{8,120}$/.test(s) ? s : ""; }
-function safeIndex(v) { const n = Number(v); return Number.isInteger(n) && n >= 0 && n <= 100000 ? n : null; }
-function safeTotal(v) { const n = Number(v); return Number.isInteger(n) && n > 0 && n <= 100000 ? n : null; }
-function safeName(v) { return String(v || "indo-story.mp4").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 160) || "indo-story.mp4"; }
-async function tg(bot, method, body) {
-  const r = await fetch(`https://api.telegram.org/bot${bot.token}/${method}`, { method: "POST", body });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok || !d?.ok) throw new Error(d?.description || `Telegram ${method} failed.`);
-  return d.result;
-}
-async function authUser(auth, req, res) {
-  const h = String(req.headers.authorization || "");
-  if (!auth || !/^Bearer\s+\S+$/i.test(h)) { res.status(401).json({ ok:false, error:"Authentication required." }); return null; }
-  try { return await auth.verifyIdToken(h.replace(/^Bearer\s+/i, "").trim(), true); }
-  catch { res.status(401).json({ ok:false, error:"Invalid or expired authentication token." }); return null; }
-}
-function patchLegacyStoryRoutes(app) {
-  const router = app.router;
-  if (!router?.stack) return;
-  for (const layer of router.stack) {
-    const path = String(layer?.route?.path || "");
-    if (path === "/api/stories") layer.route.stack = [];
-  }
-}
+function bots() { const out=[]; for(let i=1;i<=MAX_BOTS;i+=1){const token=env(`TELEGRAM_BOT_TOKEN_${i}`)||(i===1?env("TELEGRAM_BOT_TOKEN"):"");const chatId=env(`TELEGRAM_CHAT_ID_${i}`)||env("TELEGRAM_CHAT_ID");if(token&&chatId)out.push({key:`bot-${i}`,index:i,token,chatId});} return out; }
+function safeId(v){const s=String(v||"").trim();return /^[A-Za-z0-9_-]{8,120}$/.test(s)?s:"";}
+function safeIndex(v){const n=Number(v);return Number.isInteger(n)&&n>=0&&n<=100000?n:null;}
+function safeTotal(v){const n=Number(v);return Number.isInteger(n)&&n>0&&n<=100000?n:null;}
+function safeName(v){return String(v||"indo-story.mp4").replace(/[^A-Za-z0-9._-]/g,"_").slice(0,160)||"indo-story.mp4";}
+async function tg(bot,method,body){const r=await fetch(`https://api.telegram.org/bot${bot.token}/${method}`,{method:"POST",body});const d=await r.json().catch(()=>({}));if(!r.ok||!d?.ok)throw new Error(d?.description||`Telegram ${method} failed.`);return d.result;}
+async function authUser(auth,req,res){const h=String(req.headers.authorization||"");if(!auth||!/^Bearer\s+\S+$/i.test(h)){res.status(401).json({ok:false,error:"Authentication required."});return null;}try{return await auth.verifyIdToken(h.replace(/^Bearer\s+/i,"").trim(),true);}catch{res.status(401).json({ok:false,error:"Invalid or expired authentication token."});return null;}}
+function disableLegacyRoutes(app){const stack=app.router?.stack;if(!Array.isArray(stack))return;for(const layer of stack){const path=String(layer?.route?.path||"");if(path==="/api/stories"||path==="/api/media/signature")layer.route.stack=[];}}
 
-if (admin.apps.length === 0) {
-  const projectId = env("FIREBASE_PROJECT_ID") || "indo-174f0";
-  const clientEmail = env("FIREBASE_CLIENT_EMAIL");
-  const privateKey = env("FIREBASE_PRIVATE_KEY").replace(/\\n/g, "\n");
-  const databaseURL = env("FIREBASE_DATABASE_URL") || "https://indo-174f0-default-rtdb.firebaseio.com";
-  if (clientEmail && privateKey) admin.initializeApp({ credential: admin.credential.cert({ projectId, clientEmail, privateKey }), databaseURL });
-}
+if(admin.apps.length===0){const projectId=env("FIREBASE_PROJECT_ID")||"indo-174f0",clientEmail=env("FIREBASE_CLIENT_EMAIL"),privateKey=env("FIREBASE_PRIVATE_KEY").replace(/\\n/g,"\n"),databaseURL=env("FIREBASE_DATABASE_URL")||"https://indo-174f0-default-rtdb.firebaseio.com";if(clientEmail&&privateKey)admin.initializeApp({credential:admin.credential.cert({projectId,clientEmail,privateKey}),databaseURL});}
 
-const originalListen = express.application.listen;
-if (!express.application.__indoTelegramStoryPatched) {
-  express.application.__indoTelegramStoryPatched = true;
-  express.application.listen = function indoTelegramStoryListen(...args) {
-    if (!this.__indoTelegramStoryAttached) {
-      const app = this;
-      const firebaseApp = admin.apps.length ? admin.app() : null;
-      const db = firebaseApp ? getDatabaseWithUrl(env("FIREBASE_DATABASE_URL") || "https://indo-174f0-default-rtdb.firebaseio.com", firebaseApp) : null;
-      const auth = firebaseApp ? admin.auth(firebaseApp) : null;
-      patchLegacyStoryRoutes(app);
-
-      app.post("/api/stories", async (req, res) => {
-        const user = await authUser(auth, req, res); if (!user || !db) return;
-        const uploadId = safeId(req.body?.uploadId);
-        const title = String(req.body?.title || "").trim().slice(0, 80);
-        const titleFont = String(req.body?.titleFont || "Arial, sans-serif").slice(0, 120);
-        const titleX = Number(req.body?.titleX ?? 50), titleY = Number(req.body?.titleY ?? 14);
-        const crop = String(req.body?.crop || "portrait").slice(0, 30);
-        const stickerDataUrl = String(req.body?.stickerDataUrl || "").slice(0, 500000);
-        const stickerX = Number(req.body?.stickerX ?? 50), stickerY = Number(req.body?.stickerY ?? 50), stickerScale = Number(req.body?.stickerScale ?? 1);
-        if (!uploadId) return res.status(400).json({ ok:false, error:"Story upload ID is required." });
-        const ref = db.ref(`telegramStoryUploads/${user.uid}/${uploadId}`);
-        const snap = await ref.get(); if (!snap.exists()) return res.status(404).json({ ok:false, error:"Story upload not found." });
-        const upload = snap.val() || {};
-        if (Number(upload.uploadedChunks || 0) < Number(upload.totalChunks || 0)) return res.status(409).json({ ok:false, error:"Story upload is incomplete." });
-        const storyRef = db.ref("stories").push();
-        const profileSnap = await db.ref(`users/${user.uid}/profile`).get();
-        const profile = profileSnap.val() || {};
-        const streamUrl = `${req.protocol || "https"}://${req.get("host")}/api/stories/telegram/${encodeURIComponent(uploadId)}/stream`;
-        const story = { id:storyRef.key, ownerUid:user.uid, uid:user.uid, username:profile.username || `@${user.uid.slice(0,8)}`, name:profile.name || "Indo User", storage:"telegram", telegram:{provider:"telegram",uploadId,size:Number(upload.size||0),totalChunks:Number(upload.totalChunks||0),chunkSize:CHUNK_SIZE,mimeType:String(upload.mimeType||"video/mp4")}, secureUrl:streamUrl, videoUrl:streamUrl, url:streamUrl, mimeType:String(upload.mimeType||"video/mp4"), title, titleFont, titleX, titleY, crop, stickerDataUrl, stickerX, stickerY, stickerScale, createdAt:Date.now(), expiresAt:Date.now()+24*60*60*1000 };
-        await storyRef.set(story); await ref.update({ status:"published", storyId:storyRef.key, updatedAt:Date.now() });
-        return res.status(201).json({ ok:true, story });
-      });
-
-      app.post("/api/stories/telegram/uploads", express.raw({ type:"application/octet-stream", limit:"2mb" }), async (req,res) => {
-        const user = await authUser(auth, req, res); if (!user || !db) return;
-        const totalChunks=safeTotal(req.headers["x-total-chunks"]), index=safeIndex(req.headers["x-chunk-index"]); const size=Number(req.headers["x-file-size"]||0); const mimeType=String(req.headers["x-mime-type"]||"video/mp4").slice(0,120); const fileName=safeName(req.headers["x-file-name"]);
-        if (!totalChunks || index===null || !Buffer.isBuffer(req.body) || !req.body.length || req.body.length>CHUNK_SIZE || !Number.isSafeInteger(size) || size<=0 || size>2*1024*1024*1024) return res.status(400).json({ok:false,error:"Invalid story chunk."});
-        let uploadId=safeId(req.headers["x-upload-id"]); if (!uploadId) { uploadId=db.ref(`telegramStoryUploads/${user.uid}`).push().key; await db.ref(`telegramStoryUploads/${user.uid}/${uploadId}`).set({uploadId,ownerUid:user.uid,fileName,mimeType,size,totalChunks,chunkSize:CHUNK_SIZE,uploadedChunks:0,chunks:{},status:"uploading",createdAt:Date.now(),updatedAt:Date.now()}); }
-        const ref=db.ref(`telegramStoryUploads/${user.uid}/${uploadId}`); const snap=await ref.get(); if(!snap.exists()) return res.status(404).json({ok:false,error:"Story upload not found."}); const upload=snap.val()||{};
-        if (index>=Number(upload.totalChunks||0)) return res.status(400).json({ok:false,error:"Chunk index is out of range."});
-        if (upload.chunks?.[index]) return res.json({ok:true,uploadId,duplicate:true,uploadedChunks:Number(upload.uploadedChunks||0),totalChunks:Number(upload.totalChunks||0)});
-        const pool=bots(); if(!pool.length) return res.status(503).json({ok:false,error:"Telegram storage is not configured."}); const bot=pool[index%pool.length];
-        try { const form=new FormData(); form.set("chat_id",bot.chatId); form.set("caption",`INDO_STORY ${uploadId} ${index+1}/${upload.totalChunks}`); form.set("document",new Blob([req.body],{type:mimeType}),`${fileName}.part${String(index).padStart(6,"0")}`); const msg=await tg(bot,"sendDocument",form); const doc=msg?.document; if(!doc?.file_id) throw new Error("Telegram did not return a document file_id."); const chunk={index,size:req.body.length,botKey:bot.key,botIndex:bot.index,fileId:String(doc.file_id),fileUniqueId:String(doc.file_unique_id||""),messageId:Number(msg.message_id||0),uploadedAt:Date.now()}; await ref.child(`chunks/${index}`).set(chunk); const result=await ref.child("uploadedChunks").transaction(v=>Number(v||0)+1); const count=Number(result.snapshot.val()||0); await ref.update({uploadedChunks:count,updatedAt:Date.now(),status:count>=Number(upload.totalChunks||0)?"complete":"uploading"}); return res.status(201).json({ok:true,uploadId,uploadedChunks:count,totalChunks:Number(upload.totalChunks||0)}); }
-        catch(e){ return res.status(502).json({ok:false,error:e?.message||"Telegram story upload failed."}); }
-      });
-
-      app.get("/api/stories/telegram/:uploadId/stream", async (req,res) => {
-        if(!db) return res.status(503).end(); const uploadId=safeId(req.params.uploadId); if(!uploadId) return res.status(400).end();
-        const rootSnap=await db.ref("telegramStoryUploads").get(); let upload=null; Object.values(rootSnap.val()||{}).some(userUploads=>{ if(userUploads?.[uploadId]) { upload=userUploads[uploadId]; return true; } return false; }); if(!upload) return res.status(404).end();
-        const total=Number(upload.size||0), chunkSize=Number(upload.chunkSize||CHUNK_SIZE), totalChunks=Number(upload.totalChunks||0), chunks=upload.chunks||{}; if(!total||!totalChunks) return res.status(500).end();
-        let start=0,end=total-1; const range=String(req.headers.range||""); if(range){const m=/^bytes=(\d*)-(\d*)$/i.exec(range); if(!m)return res.status(416).set("Content-Range",`bytes */${total}`).end(); start=m[1]?Number(m[1]):Math.max(0,total-Number(m[2]||0)); end=m[2]?Number(m[2]):total-1; if(start<0||end<start||start>=total)return res.status(416).set("Content-Range",`bytes */${total}`).end(); end=Math.min(end,total-1);}
-        const mime=String(upload.mimeType||"video/mp4"); res.set({"Accept-Ranges":"bytes","Content-Type":mime,"Content-Length":String(end-start+1),"Content-Disposition":"inline","Cache-Control":"public, max-age=3600","X-Content-Type-Options":"nosniff"}); if(range)res.status(206).set("Content-Range",`bytes ${start}-${end}/${total}`); if(req.method==="HEAD")return res.end();
-        try { for(let i=Math.floor(start/chunkSize);i<=Math.floor(end/chunkSize);i++){const c=chunks[i]||chunks[String(i)];if(!c?.fileId)return res.destroy(new Error(`Missing story chunk ${i}`));const bot=bots().find(b=>b.key===c.botKey);if(!bot)return res.destroy(new Error("Telegram bot unavailable."));const form=new FormData();form.set("file_id",c.fileId);const meta=await tg(bot,"getFile",form);const r=await fetch(`https://api.telegram.org/file/bot${bot.token}/${meta.file_path}`);if(!r.ok)throw new Error(`Telegram file download failed (${r.status}).`);const data=Buffer.from(await r.arrayBuffer());const cs=i*chunkSize,from=Math.max(0,start-cs),to=Math.min(data.length,end-cs+1);if(to>from)res.write(data.subarray(from,to));}return res.end(); } catch(e){if(!res.headersSent)return res.status(502).json({ok:false,error:e?.message||"Telegram story stream failed."});return res.destroy(e);}
-      });
-
-      app.get("/api/stories", async (_req,res) => {
-        if(!db) return res.status(503).json({ok:false,error:"Service unavailable."});
-        try { const snap=await db.ref("stories").get(); const now=Date.now(); const stories=Object.values(snap.val()||{}).filter(s=>s&&Number(s.expiresAt||0)>now&&String(s.storage||"")==="telegram").sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0); return res.json({ok:true,stories}); } catch(e){ return res.status(500).json({ok:false,error:e?.message||"Could not load stories."}); }
-      });
-      this.__indoTelegramStoryAttached=true;
-      console.log("Telegram-only story storage enabled.");
-    }
-    return originalListen.apply(this,args);
-  };
-}
+const originalListen=express.application.listen;
+if(!express.application.__indoTelegramStoryPatched){express.application.__indoTelegramStoryPatched=true;express.application.listen=function indoTelegramStoryListen(...args){if(!this.__indoTelegramStoryAttached){const app=this;const firebaseApp=admin.apps.length?admin.app():null;const db=firebaseApp?getDatabaseWithUrl(env("FIREBASE_DATABASE_URL")||"https://indo-174f0-default-rtdb.firebaseio.com",firebaseApp):null;const auth=firebaseApp?admin.auth(firebaseApp):null;disableLegacyRoutes(app);
+app.post("/api/stories",async(req,res)=>{const user=await authUser(auth,req,res);if(!user||!db)return;const uploadId=safeId(req.body?.uploadId);if(!uploadId)return res.status(400).json({ok:false,error:"Story upload ID is required."});const ref=db.ref(`telegramStoryUploads/${user.uid}/${uploadId}`),snap=await ref.get();if(!snap.exists())return res.status(404).json({ok:false,error:"Story upload not found."});const upload=snap.val()||{};if(Number(upload.uploadedChunks||0)<Number(upload.totalChunks||0))return res.status(409).json({ok:false,error:"Story upload is incomplete."});const profile=(await db.ref(`users/${user.uid}/profile`).get()).val()||{},storyRef=db.ref("stories").push(),streamUrl=`${req.protocol||"https"}://${req.get("host")}/api/stories/telegram/${encodeURIComponent(uploadId)}/stream`;const story={id:storyRef.key,ownerUid:user.uid,uid:user.uid,username:profile.username||`@${user.uid.slice(0,8)}`,name:profile.name||"Indo User",storage:"telegram",telegram:{provider:"telegram",uploadId,size:Number(upload.size||0),totalChunks:Number(upload.totalChunks||0),chunkSize:CHUNK_SIZE,mimeType:String(upload.mimeType||"video/mp4")},secureUrl:streamUrl,videoUrl:streamUrl,url:streamUrl,mimeType:String(upload.mimeType||"video/mp4"),title:String(req.body?.title||"").trim().slice(0,80),titleFont:String(req.body?.titleFont||"Arial, sans-serif").slice(0,120),titleX:Number(req.body?.titleX??50),titleY:Number(req.body?.titleY??14),crop:String(req.body?.crop||"portrait").slice(0,30),stickerDataUrl:String(req.body?.stickerDataUrl||"").slice(0,500000),stickerX:Number(req.body?.stickerX??50),stickerY:Number(req.body?.stickerY??50),stickerScale:Number(req.body?.stickerScale??1),createdAt:Date.now(),expiresAt:Date.now()+86400000};await storyRef.set(story);await ref.update({status:"published",storyId:storyRef.key,updatedAt:Date.now()});return res.status(201).json({ok:true,story});});
+app.post("/api/stories/telegram/uploads",express.raw({type:"application/octet-stream",limit:"2mb"}),async(req,res)=>{const user=await authUser(auth,req,res);if(!user||!db)return;const totalChunks=safeTotal(req.headers["x-total-chunks"]),index=safeIndex(req.headers["x-chunk-index"]),size=Number(req.headers["x-file-size"]||0),mimeType=String(req.headers["x-mime-type"]||"video/mp4").slice(0,120),fileName=safeName(req.headers["x-file-name"]);if(!totalChunks||index===null||!Buffer.isBuffer(req.body)||!req.body.length||req.body.length>CHUNK_SIZE||!Number.isSafeInteger(size)||size<=0||size>2*1024*1024*1024)return res.status(400).json({ok:false,error:"Invalid story chunk."});let uploadId=safeId(req.headers["x-upload-id"]);if(!uploadId){uploadId=db.ref(`telegramStoryUploads/${user.uid}`).push().key;await db.ref(`telegramStoryUploads/${user.uid}/${uploadId}`).set({uploadId,ownerUid:user.uid,fileName,mimeType,size,totalChunks,chunkSize:CHUNK_SIZE,uploadedChunks:0,chunks:{},status:"uploading",createdAt:Date.now(),updatedAt:Date.now()});}const ref=db.ref(`telegramStoryUploads/${user.uid}/${uploadId}`),snap=await ref.get();if(!snap.exists())return res.status(404).json({ok:false,error:"Story upload not found."});const upload=snap.val()||{};if(index>=Number(upload.totalChunks||0))return res.status(400).json({ok:false,error:"Chunk index is out of range."});if(upload.chunks?.[index])return res.json({ok:true,uploadId,duplicate:true,uploadedChunks:Number(upload.uploadedChunks||0),totalChunks:Number(upload.totalChunks||0)});const pool=bots();if(!pool.length)return res.status(503).json({ok:false,error:"Telegram storage is not configured."});const bot=pool[index%pool.length];try{const form=new FormData();form.set("chat_id",bot.chatId);form.set("caption",`INDO_STORY ${uploadId} ${index+1}/${upload.totalChunks}`);form.set("document",new Blob([req.body],{type:mimeType}),`${fileName}.part${String(index).padStart(6,"0")}`);const msg=await tg(bot,"sendDocument",form),doc=msg?.document;if(!doc?.file_id)throw new Error("Telegram did not return a document file_id.");const chunk={index,size:req.body.length,botKey:bot.key,botIndex:bot.index,fileId:String(doc.file_id),fileUniqueId:String(doc.file_unique_id||""),messageId:Number(msg.message_id||0),uploadedAt:Date.now()};await ref.child(`chunks/${index}`).set(chunk);const result=await ref.child("uploadedChunks").transaction(v=>Number(v||0)+1),count=Number(result.snapshot.val()||0);await ref.update({uploadedChunks:count,updatedAt:Date.now(),status:count>=Number(upload.totalChunks||0)?"complete":"uploading"});return res.status(201).json({ok:true,uploadId,uploadedChunks:count,totalChunks:Number(upload.totalChunks||0)});}catch(e){return res.status(502).json({ok:false,error:e?.message||"Telegram story upload failed."});}});
+app.get("/api/stories/telegram/:uploadId/stream",async(req,res)=>{if(!db)return res.status(503).end();const uploadId=safeId(req.params.uploadId);if(!uploadId)return res.status(400).end();const rootSnap=await db.ref("telegramStoryUploads").get();let upload=null;Object.values(rootSnap.val()||{}).some(userUploads=>{if(userUploads?.[uploadId]){upload=userUploads[uploadId];return true;}return false;});if(!upload)return res.status(404).end();const total=Number(upload.size||0),chunkSize=Number(upload.chunkSize||CHUNK_SIZE),totalChunks=Number(upload.totalChunks||0),chunks=upload.chunks||{};if(!total||!totalChunks)return res.status(500).end();let start=0,end=total-1;const range=String(req.headers.range||"");if(range){const m=/^bytes=(\d*)-(\d*)$/i.exec(range);if(!m)return res.status(416).set("Content-Range",`bytes */${total}`).end();start=m[1]?Number(m[1]):Math.max(0,total-Number(m[2]||0));end=m[2]?Number(m[2]):total-1;if(start<0||end<start||start>=total)return res.status(416).set("Content-Range",`bytes */${total}`).end();end=Math.min(end,total-1);}const mime=String(upload.mimeType||"video/mp4");res.set({"Accept-Ranges":"bytes","Content-Type":mime,"Content-Length":String(end-start+1),"Content-Disposition":"inline","Cache-Control":"public,max-age=3600","X-Content-Type-Options":"nosniff"});if(range)res.status(206).set("Content-Range",`bytes ${start}-${end}/${total}`);if(req.method==="HEAD")return res.end();try{for(let i=Math.floor(start/chunkSize);i<=Math.floor(end/chunkSize);i++){const c=chunks[i]||chunks[String(i)];if(!c?.fileId)throw new Error(`Missing story chunk ${i}`);const bot=bots().find(b=>b.key===c.botKey);if(!bot)throw new Error("Telegram bot unavailable.");const form=new FormData();form.set("file_id",c.fileId);const meta=await tg(bot,"getFile",form),r=await fetch(`https://api.telegram.org/file/bot${bot.token}/${meta.file_path}`);if(!r.ok)throw new Error(`Telegram file download failed (${r.status}).`);const data=Buffer.from(await r.arrayBuffer()),cs=i*chunkSize,from=Math.max(0,start-cs),to=Math.min(data.length,end-cs+1);if(to>from)res.write(data.subarray(from,to));}return res.end();}catch(e){if(!res.headersSent)return res.status(502).json({ok:false,error:e?.message||"Telegram story stream failed."});return res.destroy(e);}});
+app.get("/api/stories",async(_req,res)=>{if(!db)return res.status(503).json({ok:false,error:"Service unavailable."});try{const snap=await db.ref("stories").get(),now=Date.now(),stories=Object.values(snap.val()||{}).filter(s=>s&&Number(s.expiresAt||0)>now&&String(s.storage||"")==="telegram").sort((a,b)=>Number(b.createdAt||0)-Number(a.createdAt||0);return res.json({ok:true,stories});}catch(e){return res.status(500).json({ok:false,error:e?.message||"Could not load stories."});}});
+this.__indoTelegramStoryAttached=true;console.log("Telegram-only story storage enabled.");}return originalListen.apply(this,args);};}
