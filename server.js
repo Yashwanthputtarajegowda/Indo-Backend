@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260818-external-video-stream-v1";
+const BACKEND_VERSION = "20260818-telegram-embed-fix-v2";
 const CANONICAL_SCHEMA_VERSION = 3;
 const PRODUCTION_FRONTEND_ORIGINS = ["https://yashwanthputtarajegowda.github.io"];
 const CORS_ORIGINS = Array.from(new Set([...PRODUCTION_FRONTEND_ORIGINS, ...String(process.env.CORS_ORIGINS || "http://localhost:5173,http://localhost:3000").split(",")].map((origin) => origin.trim().replace(/\/$/, "")).filter(Boolean)));
@@ -73,6 +73,41 @@ function normalizeUserId(value) { return String(value || "").trim().toLowerCase(
 function userIdKey(userId) { return userId.replace(/\./g, "%2E").replace(/#/g, "%23").replace(/\$/g, "%24").replace(/\//g, "%2F").replace(/\[/g, "%5B").replace(/\]/g, "%5D"); }
 function validUserId(userId) { return /^[a-z0-9._-]{1,50}$/.test(userId); }
 
+function rebuildTelegramEmbed(source) {
+  try {
+    const url = new URL(String(source || ""));
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (!["t.me", "telegram.me"].includes(host) && !host.endsWith("telegram.org")) return "";
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts[0] === "s" && parts.length >= 3 && /^\d+$/.test(parts[2])) return `https://t.me/${encodeURIComponent(parts[1])}/${encodeURIComponent(parts[2])}?embed=1`;
+    if (parts[0] === "c" && parts.length >= 3 && /^\d+$/.test(parts[1]) && /^\d+$/.test(parts[2])) return `https://t.me/c/${encodeURIComponent(parts[1])}/${encodeURIComponent(parts[2])}?embed=1`;
+    if (parts.length >= 2 && /^\d+$/.test(parts[1])) return `https://t.me/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}?embed=1`;
+  } catch {}
+  return "";
+}
+function rebuildYoutubeEmbed(source) {
+  try {
+    const url = new URL(String(source || ""));
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (host === "youtu.be") { const id = url.pathname.slice(1).split("/")[0]; return id ? `https://www.youtube.com/embed/${encodeURIComponent(id)}?playsinline=1&rel=0&modestbranding=1` : ""; }
+    if (!["youtube.com", "m.youtube.com"].includes(host)) return "";
+    const v = url.searchParams.get("v");
+    if (v) return `https://www.youtube.com/embed/${encodeURIComponent(v)}?playsinline=1&rel=0&modestbranding=1`;
+    const parts = url.pathname.split("/").filter(Boolean); const i = parts.findIndex((part) => ["shorts", "embed", "live"].includes(part)); const id = i >= 0 ? parts[i + 1] : "";
+    return id ? `https://www.youtube.com/embed/${encodeURIComponent(id)}?playsinline=1&rel=0&modestbranding=1` : "";
+  } catch { return ""; }
+}
+function normalizeExternalPlayback(item) {
+  if (!item || String(item.storage?.provider || "").toLowerCase() !== "external-url") return item;
+  const source = String(item.sourceUrl || item.external?.sourceUrl || "").trim();
+  if (!source) return item;
+  const telegramEmbed = rebuildTelegramEmbed(source);
+  if (telegramEmbed) return { ...item, sourceType: "telegram", playerType: "telegram-embed", embedUrl: telegramEmbed, videoUrl: source, secureUrl: source, streamUrl: "" };
+  const youtubeEmbed = rebuildYoutubeEmbed(source);
+  if (youtubeEmbed) return { ...item, sourceType: "youtube", playerType: "youtube", embedUrl: youtubeEmbed, videoUrl: source, secureUrl: source, streamUrl: "" };
+  return item;
+}
+
 async function requireUser(req, res) {
   if (!auth) { res.status(503).json({ ok: false, error: "Authentication service is unavailable." }); return null; }
   const header = String(req.headers.authorization || "");
@@ -99,7 +134,7 @@ app.get("/api/media/videos", async (req, res) => {
   const type = String(req.query.type || "").trim().toLowerCase();
   try {
     const snapshot = await db.ref("videos").get();
-    let videos = Object.values(snapshot.val() || {}).filter((item) => item);
+    let videos = Object.values(snapshot.val() || {}).filter((item) => item).map(normalizeExternalPlayback);
     videos.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     if (type === "video" || type === "reel") videos = videos.filter((item) => (item.mediaType || "video") === type);
     return res.json({ ok: true, videos: videos.slice(0, limit) });
