@@ -58,7 +58,6 @@ async function sendTelegramVideo({ token, chatId, buffer, fileName, mimeType, ca
 export function createTelegramMediaUploadRouter({ db, requireUser }) {
   const router = express.Router();
 
-  // Keep the dependencies on the router itself so the endpoint is self-contained.
   router.use((req, _res, next) => {
     req.indoTelegramDb = db;
     req.indoTelegramRequireUser = requireUser;
@@ -66,7 +65,7 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
   });
 
   router.post(
-    "/media/videos/upload-telegram",
+    "/telegram/uploads",
     express.raw({ type: () => true, limit: "50mb" }),
     async (req, res) => {
       const user = await req.indoTelegramRequireUser?.(req, res);
