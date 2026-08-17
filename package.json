@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --import ./security-bootstrap.mjs --import ./security-router-guard.mjs --import ./security-csrf.mjs --import ./security-rate-limit.mjs --import ./security-headers.mjs --import ./security-error-guard.mjs --import ./security-account-reauth.mjs --import ./security-abuse.mjs --import ./security-read-guards.mjs --import ./telegram-boot.mjs server.js",
+    "start": "node --import ./security-bootstrap.mjs --import ./security-router-guard.mjs --import ./security-csrf.mjs --import ./security-rate-limit.mjs --import ./security-headers.mjs --import ./security-error-guard.mjs --import ./security-account-reauth.mjs --import ./security-abuse.mjs --import ./security-read-guards.mjs --import ./telegram-playback-proxy-fix.mjs --import ./telegram-boot.mjs server.js",
     "preflight:production": "node scripts/production-preflight.mjs",
     "security:smoke": "node scripts/security-smoke-test.mjs",
     "migrate:telegram": "node scripts/migrate-cloudinary-to-telegram.mjs",
@@ -13,6 +13,8 @@
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
     "firebase-admin": "^13.0.2",
