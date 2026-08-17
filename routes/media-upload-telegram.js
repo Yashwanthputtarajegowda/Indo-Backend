@@ -6,41 +6,15 @@ import { saveCanonicalVideo } from "../services/canonical-content.js";
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
-function text(value, max = 500) {
-  return String(value ?? "").trim().slice(0, max);
-}
-
-function bool(value, fallback = true) {
-  if (value === undefined || value === null || value === "") return fallback;
-  return String(value).toLowerCase() !== "false";
-}
-
-function safeFileName(value, fallback = "indo-video.mp4") {
-  const cleaned = text(value, 140)
-    .normalize("NFKD")
-    .replace(/[^A-Za-z0-9._-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-  return cleaned || fallback;
-}
-
-function telegramConfig() {
-  const token = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
-  const chatId = String(process.env.TELEGRAM_CHAT_ID || "").trim();
-  return { token, chatId, configured: Boolean(token && chatId) };
-}
+function text(value, max = 500) { return String(value ?? "").trim().slice(0, max); }
+function bool(value, fallback = true) { if (value === undefined || value === null || value === "") return fallback; return String(value).toLowerCase() !== "false"; }
+function safeFileName(value, fallback = "indo-video.mp4") { const cleaned = text(value, 140).normalize("NFKD").replace(/[^A-Za-z0-9._-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, ""); return cleaned || fallback; }
+function telegramConfig() { const token = String(process.env.TELEGRAM_BOT_TOKEN || "").trim(); const chatId = String(process.env.TELEGRAM_CHAT_ID || "").trim(); return { token, chatId, configured: Boolean(token && chatId) }; }
 
 async function telegramCall(token, method, body) {
-  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-    method: "POST",
-    body,
-  });
+  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: "POST", body });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data?.ok) {
-    const error = new Error(data?.description || `Telegram ${method} failed.`);
-    error.status = response.status;
-    throw error;
-  }
+  if (!response.ok || !data?.ok) { const error = new Error(data?.description || `Telegram ${method} failed.`); error.status = response.status; throw error; }
   return data.result;
 }
 
@@ -49,16 +23,10 @@ async function sendTelegramVideo({ token, chatId, buffer, fileName, mimeType, ca
   form.set("chat_id", chatId);
   form.set("caption", String(caption || "").slice(0, 1024));
   form.set("video", new Blob([buffer], { type: mimeType || "video/mp4" }), fileName);
-
   const message = await telegramCall(token, "sendVideo", form);
   const video = message?.video;
   if (!video?.file_id) throw new Error("Telegram did not return a video file id.");
-  return {
-    messageId: Number(message.message_id || 0),
-    fileId: String(video.file_id),
-    fileUniqueId: String(video.file_unique_id || ""),
-    fileName,
-  };
+  return { messageId: Number(message.message_id || 0), fileId: String(video.file_id), fileUniqueId: String(video.file_unique_id || ""), fileName };
 }
 
 async function getTelegramFilePath({ token, fileId }) {
@@ -70,61 +38,26 @@ async function getTelegramFilePath({ token, fileId }) {
   return filePath;
 }
 
-function setNoCacheHeaders(res) {
-  res.set({
-    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0",
-    Pragma: "no-cache",
-    Expires: "0",
-    "Surrogate-Control": "no-store",
-    "X-Content-Type-Options": "nosniff",
-  });
-}
-
+function setNoCacheHeaders(res) { res.set({ "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0", Pragma: "no-cache", Expires: "0", "Surrogate-Control": "no-store", "X-Content-Type-Options": "nosniff" }); }
 function setStreamHeaders(res, { mimeType, length, total, start, end, partial }) {
   setNoCacheHeaders(res);
-  res.set({
-    "Accept-Ranges": "bytes",
-    "Content-Type": mimeType || "video/mp4",
-    "Content-Disposition": "inline",
-  });
-
+  res.set({ "Accept-Ranges": "bytes", "Content-Type": mimeType || "video/mp4", "Content-Disposition": "inline" });
   if (Number.isFinite(length)) res.set("Content-Length", String(length));
-
-  if (partial && Number.isFinite(total) && Number.isFinite(start) && Number.isFinite(end)) {
-    res.status(206).set("Content-Range", `bytes ${start}-${end}/${total}`);
-  } else {
-    res.status(200);
-  }
+  if (partial && Number.isFinite(total) && Number.isFinite(start) && Number.isFinite(end)) res.status(206).set("Content-Range", `bytes ${start}-${end}/${total}`); else res.status(200);
 }
 
 export function createTelegramMediaUploadRouter({ db, requireUser }) {
   const router = express.Router();
-
-  router.use((req, _res, next) => {
-    req.indoTelegramDb = db;
-    req.indoTelegramRequireUser = requireUser;
-    next();
-  });
+  router.use((req, _res, next) => { req.indoTelegramDb = db; req.indoTelegramRequireUser = requireUser; next(); });
 
   const uploadHandler = async (req, res) => {
-    const user = await req.indoTelegramRequireUser?.(req, res);
-    if (!user) return;
-
-    const database = req.indoTelegramDb;
-    if (!database) return res.status(503).json({ ok: false, error: "Service unavailable." });
-
-    const config = telegramConfig();
-    if (!config.configured) {
-      return res.status(503).json({ ok: false, error: "Telegram storage is not configured." });
-    }
-
+    const user = await req.indoTelegramRequireUser?.(req, res); if (!user) return;
+    const database = req.indoTelegramDb; if (!database) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    const config = telegramConfig(); if (!config.configured) return res.status(503).json({ ok: false, error: "Telegram storage is not configured." });
     const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     const incomingMime = String(req.headers["content-type"] || "video/mp4").split(";")[0].trim().toLowerCase();
     const mimeType = incomingMime === "application/octet-stream" ? "video/mp4" : incomingMime;
-
-    if (!mimeType.startsWith("video/")) {
-      return res.status(400).json({ ok: false, error: "Only video uploads are supported." });
-    }
+    if (!mimeType.startsWith("video/")) return res.status(400).json({ ok: false, error: "Only video uploads are supported." });
     if (!body.length) return res.status(400).json({ ok: false, error: "Video file is missing." });
     if (body.length > MAX_VIDEO_BYTES) return res.status(413).json({ ok: false, error: "Video must be 50 MB or smaller." });
 
@@ -137,11 +70,7 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
     const allowDuet = bool(req.query.allowDuet ?? req.headers["x-allow-duet"], true);
     const category = text(req.query.category || req.headers["x-category"], 60);
     const location = text(req.query.location || req.headers["x-location"], 120);
-    const tags = String(req.query.tags || req.headers["x-tags"] || "")
-      .split(",")
-      .map((v) => v.trim().replace(/^#/, ""))
-      .filter(Boolean)
-      .slice(0, 20);
+    const tags = String(req.query.tags || req.headers["x-tags"] || "").split(",").map((v) => v.trim().replace(/^#/, "")).filter(Boolean).slice(0, 20);
     const duration = Math.max(0, Number(req.query.duration ?? req.headers["x-duration"]) || 0);
     const width = Math.max(0, Number(req.query.width ?? req.headers["x-width"]) || 0);
     const height = Math.max(0, Number(req.query.height ?? req.headers["x-height"]) || 0);
@@ -150,64 +79,28 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
 
     try {
       const profile = (await syncCanonicalUser({ db: database, uid: user.uid, includeContent: false })).profile;
-      const telegram = await sendTelegramVideo({
-        token: config.token,
-        chatId: config.chatId,
-        buffer: body,
-        fileName,
-        mimeType,
-        caption: caption || title,
-      });
+      const telegram = await sendTelegramVideo({ token: config.token, chatId: config.chatId, buffer: body, fileName, mimeType, caption: caption || title });
+      const filePath = await getTelegramFilePath({ token: config.token, fileId: telegram.fileId });
 
       const videoRef = database.ref("videos").push();
       const videoId = String(videoRef.key);
       const baseUrl = `${req.protocol || "https"}://${req.get("host")}`;
       const streamUrl = `${baseUrl}/api/media/videos/${encodeURIComponent(videoId)}/telegram-stream`;
-
       const video = {
-        id: videoId,
-        mediaType,
-        mimeType,
-        ownerUid: user.uid,
+        id: videoId, mediaType, mimeType, ownerUid: user.uid,
         creator: profile.username || `@${String(user.uid).slice(0, 8)}`,
-        creatorName: profile.name || "Indo User",
-        title,
-        caption,
-        secureUrl: streamUrl,
-        videoUrl: streamUrl,
-        streamUrl,
-        privacy,
-        allowComments,
-        allowDuet,
-        category,
-        tags,
-        location,
-        duration,
-        width,
-        height,
-        views: 0,
-        likes: 0,
-        createdAt: admin.database.ServerValue.TIMESTAMP,
+        creatorName: profile.name || "Indo User", title, caption,
+        secureUrl: streamUrl, videoUrl: streamUrl, streamUrl, privacy,
+        allowComments, allowDuet, category, tags, location, duration, width, height,
+        views: 0, likes: 0, createdAt: admin.database.ServerValue.TIMESTAMP,
         storage: { provider: "telegram", mode: "direct-upload" },
-        telegram: {
-          provider: "telegram",
-          uploadId,
-          messageId: telegram.messageId,
-          fileId: telegram.fileId,
-          fileUniqueId: telegram.fileUniqueId,
-          fileName: telegram.fileName,
-          chatId: config.chatId,
-          mimeType,
-          size: body.length,
-          streamUrl,
-        },
+        telegram: { provider: "telegram", uploadId, messageId: telegram.messageId, fileId: telegram.fileId, fileUniqueId: telegram.fileUniqueId, fileName: telegram.fileName, filePath, chatId: config.chatId, mimeType, size: body.length, streamUrl },
       };
 
       await videoRef.set(video);
       await saveCanonicalVideo({ db: database, uid: user.uid, video: { ...video, createdAt: Date.now() } });
       await database.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => (Number(current) || 0) + 1);
       await database.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).transaction((current) => (Number(current) || 0) + 1);
-
       return res.status(201).json({ ok: true, uploadId, video });
     } catch (error) {
       console.error("Telegram upload failed:", error?.message || error);
@@ -221,84 +114,43 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
   const streamHandler = async (req, res) => {
     const database = req.indoTelegramDb;
     if (!database) return res.status(503).json({ ok: false, error: "Service unavailable." });
-
-    const videoId = text(req.params.videoId, 200);
-    if (!videoId) return res.status(400).json({ ok: false, error: "Invalid video ID." });
+    const videoId = text(req.params.videoId, 200); if (!videoId) return res.status(400).json({ ok: false, error: "Invalid video ID." });
 
     try {
       const snapshot = await database.ref(`videos/${videoId}`).get();
       if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Video not found." });
-
       const video = snapshot.val() || {};
       const provider = String(video.storage?.provider || video.telegram?.provider || "").toLowerCase();
       if (provider !== "telegram") return res.status(404).json({ ok: false, error: "Telegram video not found." });
-
       const fileId = String(video.telegram?.fileId || "").trim();
       const config = telegramConfig();
       if (!fileId || !config.configured) return res.status(404).json({ ok: false, error: "Telegram video file is unavailable." });
 
-      const filePath = await getTelegramFilePath({ token: config.token, fileId });
-      const upstreamHeaders = {
-        "Cache-Control": "no-cache, no-store, max-age=0",
-        Pragma: "no-cache",
-      };
+      // New uploads store filePath at upload time, avoiding a Telegram getFile call on every playback.
+      const filePath = String(video.telegram?.filePath || "").trim() || await getTelegramFilePath({ token: config.token, fileId });
       const requestedRange = String(req.headers.range || "").trim();
+      const upstreamHeaders = { "Cache-Control": "no-cache, no-store, max-age=0", Pragma: "no-cache" };
       if (requestedRange) upstreamHeaders.Range = requestedRange;
 
-      const upstream = await fetch(`https://api.telegram.org/file/bot${config.token}/${filePath}`, {
-        method: "GET",
-        cache: "no-store",
-        headers: upstreamHeaders,
-      });
-
-      if (!upstream.ok && upstream.status !== 206) {
-        throw new Error(`Telegram file stream failed (${upstream.status}).`);
-      }
+      const upstream = await fetch(`https://api.telegram.org/file/bot${config.token}/${filePath}`, { method: "GET", cache: "no-store", headers: upstreamHeaders });
+      if (!upstream.ok && upstream.status !== 206) throw new Error(`Telegram file stream failed (${upstream.status}).`);
       if (!upstream.body) throw new Error("Telegram stream body is unavailable.");
 
       const mimeType = String(upstream.headers.get("content-type") || video.mimeType || video.telegram?.mimeType || "video/mp4");
       const contentLength = Number(upstream.headers.get("content-length") || 0);
       const contentRange = String(upstream.headers.get("content-range") || "");
-      let total = contentRange.match(/\/(\d+)$/)?.[1];
-
       if (req.method === "HEAD") {
-        setNoCacheHeaders(res);
-        res.set({
-          "Accept-Ranges": "bytes",
-          "Content-Type": mimeType,
-        });
+        setNoCacheHeaders(res); res.set({ "Accept-Ranges": "bytes", "Content-Type": mimeType });
         if (contentLength > 0) res.set("Content-Length", String(contentLength));
         if (contentRange) res.set("Content-Range", contentRange);
         return res.status(upstream.status === 206 ? 206 : 200).end();
       }
 
-      if (contentRange) {
-        const rangeMatch = contentRange.match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i);
-        if (rangeMatch) {
-          setStreamHeaders(res, {
-            mimeType,
-            length: contentLength || Number(rangeMatch[2]) - Number(rangeMatch[1]) + 1,
-            total: Number(rangeMatch[3]),
-            start: Number(rangeMatch[1]),
-            end: Number(rangeMatch[2]),
-            partial: true,
-          });
-        } else {
-          setStreamHeaders(res, { mimeType, length: contentLength, partial: false });
-        }
-      } else {
-        setStreamHeaders(res, {
-          mimeType,
-          length: contentLength > 0 ? contentLength : undefined,
-          total: total ? Number(total) : undefined,
-          start: 0,
-          end: contentLength > 0 ? contentLength - 1 : undefined,
-          partial: false,
-        });
-      }
+      const rangeMatch = contentRange.match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i);
+      if (rangeMatch) setStreamHeaders(res, { mimeType, length: contentLength || Number(rangeMatch[2]) - Number(rangeMatch[1]) + 1, total: rangeMatch[3] === "*" ? undefined : Number(rangeMatch[3]), start: Number(rangeMatch[1]), end: Number(rangeMatch[2]), partial: true });
+      else setStreamHeaders(res, { mimeType, length: contentLength > 0 ? contentLength : undefined, partial: false });
 
-      // Do not buffer the Telegram file. Start sending bytes immediately.
-      await Readable.fromWeb(upstream.body).pipe(res);
+      Readable.fromWeb(upstream.body).pipe(res);
     } catch (error) {
       console.error("Telegram video stream failed:", error?.message || error);
       if (!res.headersSent) return res.status(502).json({ ok: false, error: error?.message || "Telegram video stream failed." });
@@ -309,18 +161,6 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
   router.get("/media/videos/:videoId/telegram-stream", streamHandler);
   router.head("/media/videos/:videoId/telegram-stream", streamHandler);
 
-  router.get("/telegram/storage-health", (_req, res) => {
-    setNoCacheHeaders(res);
-    const config = telegramConfig();
-    res.json({
-      ok: true,
-      configured: config.configured,
-      mode: "direct-stream",
-      sourceOfTruth: "telegram-bot",
-      cache: "disabled",
-      maxVideoBytes: MAX_VIDEO_BYTES,
-    });
-  });
-
+  router.get("/telegram/storage-health", (_req, res) => { setNoCacheHeaders(res); const config = telegramConfig(); res.json({ ok: true, configured: config.configured, mode: "direct-stream", sourceOfTruth: "telegram-bot", cache: "disabled", maxVideoBytes: MAX_VIDEO_BYTES }); });
   return router;
 }
