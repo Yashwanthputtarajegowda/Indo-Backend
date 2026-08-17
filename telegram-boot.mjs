@@ -4,7 +4,7 @@ import { getDatabaseWithUrl } from "firebase-admin/database";
 import { canonicalUserRoot, syncCanonicalUser } from "./services/user-canonical.js";
 import { saveCanonicalVideo } from "./services/canonical-content.js";
 
-const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_BOTS = 50;
 
 function env(name) {
@@ -146,7 +146,7 @@ if (!express.application.__indoTelegramSingleVideoPatched) {
       const auth = firebaseApp ? admin.auth(firebaseApp) : null;
       disableLegacyMediaRoutes(app);
 
-      app.post("/api/telegram/uploads", express.raw({ type: "application/octet-stream", limit: "20mb" }), async (req, res) => {
+      app.post("/api/telegram/uploads", express.raw({ type: "application/octet-stream", limit: "50mb" }), async (req, res) => {
         const user = await authUser(auth, req, res);
         if (!user || !db) return;
         const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
@@ -169,7 +169,7 @@ if (!express.application.__indoTelegramSingleVideoPatched) {
         const height = Number(req.headers["x-height"] || 0);
 
         if (!body.length || !Number.isSafeInteger(size) || size !== body.length || size > MAX_VIDEO_BYTES) {
-          return res.status(413).json({ ok: false, error: "Video must be a single file no larger than 20 MB." });
+          return res.status(413).json({ ok: false, error: "Video must be a single file no larger than 50 MB." });
         }
         if (!clientUploadId) return res.status(400).json({ ok: false, error: "Upload ID is required." });
         if (!mimeType.startsWith("video/")) return res.status(400).json({ ok: false, error: "Only video files are allowed." });
