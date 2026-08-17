@@ -2,7 +2,7 @@ import express from "express";
 import admin from "firebase-admin";
 import { Readable } from "node:stream";
 import { canonicalUserRoot, syncCanonicalUser } from "../services/user-canonical.js";
-import { saveCanonicalVideo } from "../services/canonical-content.js";
+import { saveCanonicalVideo, updateCanonicalVideoViews, deleteCanonicalVideo } from "../services/canonical-content.js";
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 
@@ -39,12 +39,8 @@ async function getTelegramFilePath({ token, fileId }) {
 }
 
 function setNoCacheHeaders(res) { res.set({ "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0", Pragma: "no-cache", Expires: "0", "Surrogate-Control": "no-store", "X-Content-Type-Options": "nosniff" }); }
-function setStreamHeaders(res, { mimeType, length, total, start, end, partial }) {
-  setNoCacheHeaders(res);
-  res.set({ "Accept-Ranges": "bytes", "Content-Type": mimeType || "video/mp4", "Content-Disposition": "inline" });
-  if (Number.isFinite(length)) res.set("Content-Length", String(length));
-  if (partial && Number.isFinite(total) && Number.isFinite(start) && Number.isFinite(end)) res.status(206).set("Content-Range", `bytes ${start}-${end}/${total}`); else res.status(200);
-}
+function setStreamHeaders(res, { mimeType, length, total, start, end, partial }) { setNoCacheHeaders(res); res.set({ "Accept-Ranges": "bytes", "Content-Type": mimeType || "video/mp4", "Content-Disposition": "inline" }); if (Number.isFinite(length)) res.set("Content-Length", String(length)); if (partial && Number.isFinite(total) && Number.isFinite(start) && Number.isFinite(end)) res.status(206).set("Content-Range", `bytes ${start}-${end}/${total}`); else res.status(200); }
+function safeHttpsUrl(value) { try { const url = new URL(String(value || "").trim()); return url.protocol === "https:" ? url.href : ""; } catch { return ""; } }
 
 export function createTelegramMediaUploadRouter({ db, requireUser }) {
   const router = express.Router();
@@ -111,6 +107,122 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
   router.post("/telegram/uploads", express.raw({ type: () => true, limit: "50mb" }), uploadHandler);
   router.post("/media/videos/upload-telegram", express.raw({ type: () => true, limit: "50mb" }), uploadHandler);
 
+  router.post("/media/external-videos", async (req, res) => {
+    const user = await req.indoTelegramRequireUser?.(req, res); if (!user) return;
+    const database = req.indoTelegramDb; if (!database) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    const url = safeHttpsUrl(req.body?.url);
+    if (!url) return res.status(400).json({ ok: false, error: "A valid HTTPS direct video URL is required." });
+    const mediaType = String(req.body?.mediaType || "video").toLowerCase() === "reel" ? "reel" : "video";
+    const title = text(req.body?.title, 120) || "Video";
+    const caption = text(req.body?.caption, 500);
+    try {
+      const profile = (await syncCanonicalUser({ db: database, uid: user.uid, includeContent: false })).profile;
+      const videoRef = database.ref("videos").push();
+      const videoId = String(videoRef.key);
+      const video = {
+        id: videoId,
+        mediaType,
+        mimeType: "video/mp4",
+        ownerUid: user.uid,
+        creator: profile.username || `@${String(user.uid).slice(0, 8)}`,
+        creatorName: profile.name || "Indo User",
+        title,
+        caption,
+        secureUrl: url,
+        videoUrl: url,
+        streamUrl: url,
+        sourceUrl: url,
+        privacy: "public",
+        allowComments: true,
+        allowDuet: true,
+        views: 0,
+        likes: 0,
+        createdAt: admin.database.ServerValue.TIMESTAMP,
+        storage: { provider: "external", mode: "link-only" },
+        external: { provider: "external", url, mode: "direct-stream" },
+      };
+      await videoRef.set(video);
+      await saveCanonicalVideo({ db: database, uid: user.uid, video: { ...video, createdAt: Date.now() } });
+      await database.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => (Number(current) || 0) + 1);
+      await database.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).transaction((current) => (Number(current) || 0) + 1);
+      return res.status(201).json({ ok: true, video });
+    } catch (error) {
+      console.error("External video link save failed:", error?.message || error);
+      return res.status(500).json({ ok: false, error: "Could not save video link." });
+    }
+  });
+
+  router.get("/media/videos", async (req, res) => {
+    const database = req.indoTelegramDb;
+    if (!database) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+    const type = String(req.query.type || "").trim().toLowerCase();
+    try {
+      const snapshot = await database.ref("videos").get();
+      let videos = Object.values(snapshot.val() || {}).filter((item) => {
+        const provider = String(item?.storage?.provider || item?.telegram?.provider || "").toLowerCase();
+        return provider === "telegram" || provider === "external";
+      });
+      videos.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+      if (type === "video" || type === "reel") videos = videos.filter((item) => (item.mediaType || "video") === type);
+      const baseUrl = `${req.protocol || "https"}://${req.get("host")}`;
+      videos = videos.slice(0, limit).map((item) => {
+        const video = { ...item };
+        const provider = String(video.storage?.provider || video.telegram?.provider || "").toLowerCase();
+        if (provider === "telegram" && video.id) {
+          const streamUrl = `${baseUrl}/api/media/videos/${encodeURIComponent(video.id)}/telegram-stream`;
+          video.streamUrl = video.streamUrl || streamUrl;
+          video.videoUrl = video.videoUrl || video.secureUrl || streamUrl;
+          video.secureUrl = video.secureUrl || video.videoUrl || streamUrl;
+        } else if (provider === "external") {
+          const direct = String(video.external?.url || video.sourceUrl || video.videoUrl || video.secureUrl || "");
+          video.streamUrl = direct;
+          video.videoUrl = direct;
+          video.secureUrl = direct;
+        }
+        return video;
+      });
+      return res.json({ ok: true, videos });
+    } catch { return res.status(500).json({ ok: false, error: "Could not load videos." }); }
+  });
+
+  router.post("/media/videos/:videoId/view", async (req, res) => {
+    const database = req.indoTelegramDb;
+    if (!database) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    const videoId = text(req.params.videoId, 200);
+    try {
+      const videoRef = database.ref(`videos/${videoId}`);
+      const snapshot = await videoRef.get();
+      if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Video not found." });
+      const video = snapshot.val() || {};
+      const provider = String(video.storage?.provider || video.telegram?.provider || "").toLowerCase();
+      if (provider !== "telegram" && provider !== "external") return res.status(404).json({ ok: false, error: "Video not found." });
+      const result = await videoRef.child("views").transaction((current) => (Number(current) || 0) + 1);
+      await updateCanonicalVideoViews({ db: database, uid: video.ownerUid, videoId, views: Number(result.snapshot.val()) || 0 });
+      return res.json({ ok: true, videoId, views: Number(result.snapshot.val()) || 0 });
+    } catch { return res.status(500).json({ ok: false, error: "Could not record video view." }); }
+  });
+
+  router.post("/media/videos/:videoId/delete", async (req, res) => {
+    const user = await req.indoTelegramRequireUser?.(req, res); if (!user) return;
+    const database = req.indoTelegramDb; if (!database) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    const videoId = text(req.params.videoId, 200);
+    try {
+      const videoRef = database.ref(`videos/${videoId}`);
+      const snapshot = await videoRef.get();
+      if (!snapshot.exists()) return res.json({ ok: true, videoId, alreadyDeleted: true });
+      const video = snapshot.val() || {};
+      const provider = String(video.storage?.provider || video.telegram?.provider || "").toLowerCase();
+      if (String(video.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own video." });
+      if (provider !== "telegram" && provider !== "external") return res.status(404).json({ ok: false, error: "Video not found." });
+      await videoRef.remove();
+      await deleteCanonicalVideo({ db: database, uid: user.uid, videoId });
+      await database.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
+      await database.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
+      return res.json({ ok: true, videoId, deleted: true });
+    } catch { return res.status(500).json({ ok: false, error: "Could not delete video." }); }
+  });
+
   const streamHandler = async (req, res) => {
     const database = req.indoTelegramDb;
     if (!database) return res.status(503).json({ ok: false, error: "Service unavailable." });
@@ -126,7 +238,6 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
       const config = telegramConfig();
       if (!fileId || !config.configured) return res.status(404).json({ ok: false, error: "Telegram video file is unavailable." });
 
-      // New uploads store filePath at upload time, avoiding a Telegram getFile call on every playback.
       const filePath = String(video.telegram?.filePath || "").trim() || await getTelegramFilePath({ token: config.token, fileId });
       const requestedRange = String(req.headers.range || "").trim();
       const upstreamHeaders = { "Cache-Control": "no-cache, no-store, max-age=0", Pragma: "no-cache" };
@@ -160,7 +271,6 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
 
   router.get("/media/videos/:videoId/telegram-stream", streamHandler);
   router.head("/media/videos/:videoId/telegram-stream", streamHandler);
-
   router.get("/telegram/storage-health", (_req, res) => { setNoCacheHeaders(res); const config = telegramConfig(); res.json({ ok: true, configured: config.configured, mode: "direct-stream", sourceOfTruth: "telegram-bot", cache: "disabled", maxVideoBytes: MAX_VIDEO_BYTES }); });
   return router;
 }
