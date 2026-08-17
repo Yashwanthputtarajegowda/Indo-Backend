@@ -128,7 +128,7 @@ async function openSourceFeed(language, topic, limit) {
   const key = `${language}|${topic}|${limit}`;
   const cached = cache.get(key);
   if (cached && Date.now() - cached.time < CACHE_MS) return cached.items;
-  const selected = topic ? [topic] : TOPICS.slice(0, 6);
+  const selected = topic ? [topic] : TOPICS;
   const queries = selected.map((item) => `${language} ${item}`);
   const settled = await Promise.allSettled(queries.flatMap((query) => [wikimedia(query), internetArchive(query)]));
   const items = [];
@@ -142,7 +142,6 @@ async function openSourceFeed(language, topic, limit) {
       items.push(item);
     }
   }
-  items.sort(() => Math.random() - 0.5);
   const selectedItems = items.slice(0, Math.max(limit * 3, 30));
   cache.set(key, { time: Date.now(), items: selectedItems });
   return selectedItems;
@@ -153,29 +152,39 @@ express.application.get = function patchedGet(path, ...handlers) {
   if (path !== "/api/media/videos") return originalGet.call(this, path, ...handlers);
 
   return originalGet.call(this, path, async (req, res) => {
-    const db = getDb();
-    if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
     const type = String(req.query.type || "").trim().toLowerCase();
     const language = String(req.query.language || "Kannada").trim() || "Kannada";
     const topic = String(req.query.topic || "").trim();
+
     try {
-      const snapshot = await db.ref("videos").get();
-      let videos = Object.values(snapshot.val() || {}).filter((item) => item && String(item.storage?.provider || item.telegram?.provider || "") === "telegram");
-      videos.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
-      if (type === "video" || type === "reel") videos = videos.filter((item) => (item.mediaType || "video") === type);
-      const baseUrl = `${req.protocol || "https"}://${req.get("host")}`;
-      videos = videos.slice(0, limit).map((item) => {
-        const video = { ...item };
-        const provider = String(video.storage?.provider || video.telegram?.provider || "").toLowerCase();
-        if (provider === "telegram" && video.id) {
-          const streamUrl = `${baseUrl}/api/media/videos/${encodeURIComponent(video.id)}/telegram-stream`;
-          video.streamUrl = video.streamUrl || streamUrl;
-          video.videoUrl = video.videoUrl || video.secureUrl || streamUrl;
-          video.secureUrl = video.secureUrl || video.videoUrl || streamUrl;
+      // Open-source videos must work even when Firebase is unavailable.
+      // Telegram/Firebase videos are only an optional first page.
+      let videos = [];
+      const db = getDb();
+      if (db) {
+        try {
+          const snapshot = await db.ref("videos").get();
+          videos = Object.values(snapshot.val() || {}).filter((item) => item && String(item.storage?.provider || item.telegram?.provider || "") === "telegram");
+          videos.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+          if (type === "video" || type === "reel") videos = videos.filter((item) => (item.mediaType || "video") === type);
+          const baseUrl = `${req.protocol || "https"}://${req.get("host")}`;
+          videos = videos.slice(0, limit).map((item) => {
+            const video = { ...item };
+            const provider = String(video.storage?.provider || video.telegram?.provider || "").toLowerCase();
+            if (provider === "telegram" && video.id) {
+              const streamUrl = `${baseUrl}/api/media/videos/${encodeURIComponent(video.id)}/telegram-stream`;
+              video.streamUrl = video.streamUrl || streamUrl;
+              video.videoUrl = video.videoUrl || video.secureUrl || streamUrl;
+              video.secureUrl = video.secureUrl || video.videoUrl || streamUrl;
+            }
+            return video;
+          });
+        } catch (error) {
+          console.warn("Telegram video lookup skipped:", error?.message || error);
         }
-        return video;
-      });
+      }
+
       const openVideos = await openSourceFeed(language, topic, limit);
       const seen = new Set(videos.map((item) => String(item.id || item.videoUrl || "")));
       for (const item of openVideos) {
@@ -185,6 +194,7 @@ express.application.get = function patchedGet(path, ...handlers) {
         videos.push(item);
         if (videos.length >= limit) break;
       }
+
       return res.json({ ok: true, videos: videos.slice(0, limit) });
     } catch (error) {
       console.warn("Open-source video feed failed:", error?.message || error);
