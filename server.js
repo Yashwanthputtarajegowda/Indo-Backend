@@ -17,12 +17,13 @@ import { createEarningsRouter } from "./routes/earnings.js";
 import { createMessagesRouter } from "./routes/messages.js";
 import { createFollowRequestsRouter } from "./routes/follow-requests.js";
 import { createNotificationsRouter } from "./routes/notifications.js";
+import { createTelegramMediaUploadRouter } from "./routes/media-upload-telegram.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260817-google-telegram-v1";
+const BACKEND_VERSION = "20260817-google-telegram-v2";
 const CANONICAL_SCHEMA_VERSION = 3;
 const PRODUCTION_FRONTEND_ORIGINS = ["https://yashwanthputtarajegowda.github.io"];
 const CORS_ORIGINS = Array.from(new Set([...PRODUCTION_FRONTEND_ORIGINS, ...String(process.env.CORS_ORIGINS || "http://localhost:5173,http://localhost:3000").split(",")].map((origin) => origin.trim().replace(/\/$/, "")).filter(Boolean)));
@@ -48,7 +49,7 @@ const corsOptions = {
     return callback(new Error("Origin is not allowed by CORS."));
   },
   methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Range"],
+  allowedHeaders: ["Content-Type", "Authorization", "Range", "X-Upload-Id", "X-File-Name", "X-File-Size", "X-Mime-Type", "X-Media-Type", "X-Title", "X-Caption", "X-Privacy", "X-Allow-Comments", "X-Allow-Duet", "X-Category", "X-Tags", "X-Location", "X-Duration", "X-Width", "X-Height"],
   exposedHeaders: ["Accept-Ranges", "Content-Length", "Content-Range", "Content-Type"],
   maxAge: 86400,
 };
@@ -88,6 +89,7 @@ app.use("/api", createSocialBlockRouter({ db, requireUser }));
 app.use("/api", createMessagesRouter({ db, requireUser }));
 app.use("/api", createFollowRequestsRouter({ db, requireUser }));
 app.use("/api", createNotificationsRouter({ db, requireUser }));
+app.use("/api", createTelegramMediaUploadRouter({ db, requireUser }));
 
 app.get("/api/media/videos", async (req, res) => {
   if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
