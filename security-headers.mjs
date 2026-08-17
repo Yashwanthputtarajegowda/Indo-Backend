@@ -12,7 +12,9 @@ express.application.handle = function securityHeadersHandle(req, res, done) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
-  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  // Video/audio files are intentionally consumed by the separate frontend origin.
+  // same-origin blocks <video> requests and produces ERR_BLOCKED_BY_RESPONSE.NotSameOrigin.
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   res.setHeader("X-Frame-Options", "DENY");
   if (req.secure || String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https") {
