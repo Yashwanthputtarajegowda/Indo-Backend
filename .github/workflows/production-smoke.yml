@@ -9,13 +9,23 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASE_URL: https://indo-backend-456919073297.asia-south1.run.app
+      EXPECTED_BACKEND_VERSION: 20260817-google-telegram-v3
     steps:
-      - name: Check backend health
+      - name: Wait for deployed backend revision
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --max-time 20 \
-            -H 'Accept: application/json' \
-            "$BASE_URL/api/health"
+          for _ in $(seq 1 60); do
+            body=$(curl --silent --show-error --max-time 10 "$BASE_URL/api/health" || true)
+            version=$(printf '%s' "$body" | jq -r '.backendVersion // empty' 2>/dev/null || true)
+            if [ "$version" = "$EXPECTED_BACKEND_VERSION" ]; then
+              printf '%s\n' "$body"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Expected backend revision $EXPECTED_BACKEND_VERSION was not deployed in time."
+          curl --silent --show-error --max-time 10 "$BASE_URL/api/health" || true
+          exit 1
 
       - name: Check production CORS preflight for upload
         run: |
@@ -27,9 +37,9 @@ jobs:
             -H 'Access-Control-Request-Headers: authorization,content-type,x-upload-id,x-file-name,x-file-size,x-mime-type,x-media-type' \
             "$BASE_URL/api/telegram/uploads")
           printf '%s\n' "$response"
-          printf '%s\n' "$response" | grep -iq '^access-control-allow-origin: https://yashwanthputtarajegowda.github.io$'
-          printf '%s\n' "$response" | grep -iq '^access-control-allow-methods:'
-          printf '%s\n' "$response" | grep -iq '^access-control-allow-headers:.*x-upload-id'
+          printf '%s\n' "$response" | grep -Eiq '^access-control-allow-origin:[[:space:]]*https://yashwanthputtarajegowda.github.io[[:space:]]*$'
+          printf '%s\n' "$response" | grep -Eiq '^access-control-allow-methods:'
+          printf '%s\n' "$response" | grep -Eiq '^access-control-allow-headers:.*x-upload-id'
 
       - name: Protected Telegram upload rejects anonymous access
         run: |
@@ -44,8 +54,7 @@ jobs:
       - name: Telegram storage health is reachable
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --max-time 20 \
-            "$BASE_URL/api/telegram/storage-health"
+          curl --fail --silent --show-error --max-time 20 "$BASE_URL/api/telegram/storage-health"
 
       - name: Legacy video view rejects anonymous access
         run: |
