@@ -13,6 +13,16 @@ function parseBool(value, fallback = true) {
   return String(value).trim().toLowerCase() !== "false";
 }
 
+function safeUploadFileName(value, fallback) {
+  const raw = safeText(value, 140);
+  const cleaned = raw
+    .normalize("NFKD")
+    .replace(/[^A-Za-z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return cleaned || fallback;
+}
+
 export function createTelegramMediaUploadRouter({ db, requireUser }) {
   const router = express.Router();
 
@@ -53,7 +63,8 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
       const duration = Math.max(0, Number(req.query.duration ?? req.headers["x-duration"]) || 0);
       const width = Math.max(0, Number(req.query.width ?? req.headers["x-width"]) || 0);
       const height = Math.max(0, Number(req.query.height ?? req.headers["x-height"]) || 0);
-      const fileName = safeText(req.headers["x-file-name"], 140) || `${mediaType}-${Date.now()}.mp4`;
+      const fallbackExtension = String(req.headers["content-type"] || "").split("/")[1]?.split(";")[0] || "mp4";
+      const fileName = safeUploadFileName(req.query.fileName || req.headers["x-file-name"], `${mediaType}-${Date.now()}.${fallbackExtension}`);
 
       try {
         const profile = (await syncCanonicalUser({ db, uid: user.uid, includeContent: false })).profile;
