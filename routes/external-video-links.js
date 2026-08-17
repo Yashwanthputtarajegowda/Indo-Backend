@@ -7,7 +7,13 @@ function validSourceUrl(value) { try { const url = new URL(String(value || "").t
 function isPrivateHostname(hostname) { const host = String(hostname || "").toLowerCase(); return host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "0.0.0.0" || host === "::1" || host.startsWith("10.") || host.startsWith("192.168.") || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host); }
 function classifySource(url) { const host = url.hostname.toLowerCase().replace(/^www\./, ""); if (["youtube.com", "youtu.be", "m.youtube.com"].includes(host)) return "youtube"; if (host === "t.me" || host === "telegram.me" || host.endsWith("telegram.org")) return "telegram"; return "direct"; }
 function youtubeId(url) { const host = url.hostname.toLowerCase().replace(/^www\./, ""); if (host === "youtu.be") return url.pathname.slice(1).split("/")[0] || ""; const v = url.searchParams.get("v"); if (v) return v.trim(); const parts = url.pathname.split("/").filter(Boolean); const i = parts.findIndex((part) => ["shorts", "embed", "live"].includes(part)); return i >= 0 ? String(parts[i + 1] || "").trim() : ""; }
-function telegramEmbed(url) { const parts = url.pathname.split("/").filter(Boolean); if (parts.length >= 2 && /^\d+$/.test(parts[1])) return `https://t.me/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}?embed=1`; return ""; }
+function telegramEmbed(url) {
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (parts[0] === "s" && parts.length >= 3 && /^\d+$/.test(parts[2])) return `https://t.me/${encodeURIComponent(parts[1])}/${encodeURIComponent(parts[2])}?embed=1`;
+  if (parts[0] === "c" && parts.length >= 3 && /^\d+$/.test(parts[1]) && /^\d+$/.test(parts[2])) return `https://t.me/c/${encodeURIComponent(parts[1])}/${encodeURIComponent(parts[2])}?embed=1`;
+  if (parts.length >= 2 && /^\d+$/.test(parts[1])) return `https://t.me/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}?embed=1`;
+  return "";
+}
 async function probeVideo(url) { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 7000); try { const response = await fetch(url, { method: "HEAD", redirect: "follow", signal: controller.signal, headers: { Accept: "video/*,*/*;q=0.8" } }); return { ok: response.ok, url: response.url || url.toString(), contentType: String(response.headers.get("content-type") || "").toLowerCase(), length: Number(response.headers.get("content-length") || 0), acceptRanges: String(response.headers.get("accept-ranges") || "").toLowerCase() }; } catch { return { ok: true, url: url.toString(), contentType: "" }; } finally { clearTimeout(timeout); } }
 function streamHeaders(res) { res.set({ "Cache-Control": "public, max-age=300, s-maxage=300, stale-while-revalidate=60", "Accept-Ranges": "bytes", "Content-Disposition": "inline", "X-Content-Type-Options": "nosniff" }); }
 
