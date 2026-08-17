@@ -5,11 +5,13 @@ on:
 jobs:
   debug:
     runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://indo-backend-456919073297.asia-south1.run.app
     steps:
       - name: Check live video API
         run: |
           set -euo pipefail
-          code=$(curl -sS -o /tmp/body -w '%{http_code}' 'https://indo-backend-production-41b1.up.railway.app/api/media/videos?limit=5')
+          code=$(curl -sS -o /tmp/body -w '%{http_code}' "$BASE_URL/api/media/videos?limit=5")
           echo "HTTP $code"
           cat /tmp/body
           node - <<'NODE'
@@ -18,8 +20,11 @@ jobs:
           let d;
           try { d = JSON.parse(raw); } catch { process.exit(2); }
           console.log('ok=', d.ok, 'count=', Array.isArray(d.videos) ? d.videos.length : 'not-array');
-          for (const v of (d.videos || [])) console.log(JSON.stringify({id:v.id,mediaType:v.mediaType,secureUrl:v.secureUrl,videoUrl:v.videoUrl,url:v.url}));
+          for (const v of (d.videos || [])) console.log(JSON.stringify({id:v.id,mediaType:v.mediaType,storage:v.storage,telegram:v.telegram}));
           if (!d.ok || !Array.isArray(d.videos)) process.exit(1);
           NODE
 
-# redeploy-trigger: 2026-08-13T03:05
+      - name: Check Telegram storage health
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 "$BASE_URL/api/telegram/storage-health"
