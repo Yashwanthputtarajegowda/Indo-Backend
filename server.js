@@ -18,12 +18,13 @@ import { createMessagesRouter } from "./routes/messages.js";
 import { createFollowRequestsRouter } from "./routes/follow-requests.js";
 import { createNotificationsRouter } from "./routes/notifications.js";
 import { createTelegramMediaUploadRouter } from "./routes/media-upload-telegram.js";
+import { createExternalVideoLinksRouter } from "./routes/external-video-links.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260817-google-telegram-v5-playback";
+const BACKEND_VERSION = "20260818-external-video-stream-v1";
 const CANONICAL_SCHEMA_VERSION = 3;
 const PRODUCTION_FRONTEND_ORIGINS = ["https://yashwanthputtarajegowda.github.io"];
 const CORS_ORIGINS = Array.from(new Set([...PRODUCTION_FRONTEND_ORIGINS, ...String(process.env.CORS_ORIGINS || "http://localhost:5173,http://localhost:3000").split(",")].map((origin) => origin.trim().replace(/\/$/, "")).filter(Boolean)));
@@ -60,13 +61,13 @@ app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false,
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: "2mb", strict: true }));
-app.use((req, res, next) => { res.setHeader("X-Indo-Backend-Version", BACKEND_VERSION); res.setHeader("Cache-Control", "no-store"); next(); });
+app.use((req, res, next) => { res.setHeader("X-Indo-Backend-Version", BACKEND_VERSION); next(); });
 
 const apiLimiter = rateLimit({ windowMs: 60000, max: 180, standardHeaders: true, legacyHeaders: false, message: { ok: false, error: "Too many requests. Please try again later." } });
 const authLimiter = rateLimit({ windowMs: 600000, max: 60, standardHeaders: true, legacyHeaders: false, message: { ok: false, error: "Too many authentication requests. Please try again later." } });
 app.use("/api", apiLimiter);
 
-app.get("/api/health", (_req, res) => res.json({ ok: true, app: "Indo-Backend", backendVersion: BACKEND_VERSION, canonicalSchemaVersion: CANONICAL_SCHEMA_VERSION, firebaseAdmin: Boolean(firebaseAdmin), databaseConfigured: Boolean(db), mediaStorage: "telegram" }));
+app.get("/api/health", (_req, res) => res.json({ ok: true, app: "Indo-Backend", backendVersion: BACKEND_VERSION, canonicalSchemaVersion: CANONICAL_SCHEMA_VERSION, firebaseAdmin: Boolean(firebaseAdmin), databaseConfigured: Boolean(db), mediaStorage: "telegram-and-external-url" }));
 
 function normalizeUserId(value) { return String(value || "").trim().toLowerCase().replace(/^@/, ""); }
 function userIdKey(userId) { return userId.replace(/\./g, "%2E").replace(/#/g, "%23").replace(/\$/g, "%24").replace(/\//g, "%2F").replace(/\[/g, "%5B").replace(/\]/g, "%5D"); }
@@ -90,6 +91,7 @@ app.use("/api", createMessagesRouter({ db, requireUser }));
 app.use("/api", createFollowRequestsRouter({ db, requireUser }));
 app.use("/api", createNotificationsRouter({ db, requireUser }));
 app.use("/api", createTelegramMediaUploadRouter({ db, requireUser }));
+app.use("/api", createExternalVideoLinksRouter({ db, requireUser }));
 
 app.get("/api/media/videos", async (req, res) => {
   if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
@@ -97,22 +99,10 @@ app.get("/api/media/videos", async (req, res) => {
   const type = String(req.query.type || "").trim().toLowerCase();
   try {
     const snapshot = await db.ref("videos").get();
-    let videos = Object.values(snapshot.val() || {}).filter((item) => item && String(item.storage?.provider || item.telegram?.provider || "") === "telegram");
+    let videos = Object.values(snapshot.val() || {}).filter((item) => item);
     videos.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     if (type === "video" || type === "reel") videos = videos.filter((item) => (item.mediaType || "video") === type);
-    const baseUrl = `${req.protocol || "https"}://${req.get("host")}`;
-    videos = videos.slice(0, limit).map((item) => {
-      const video = { ...item };
-      const provider = String(video.storage?.provider || video.telegram?.provider || "").toLowerCase();
-      if (provider === "telegram" && video.id) {
-        const streamUrl = `${baseUrl}/api/media/videos/${encodeURIComponent(video.id)}/telegram-stream`;
-        video.streamUrl = video.streamUrl || streamUrl;
-        video.videoUrl = video.videoUrl || video.secureUrl || streamUrl;
-        video.secureUrl = video.secureUrl || video.videoUrl || streamUrl;
-      }
-      return video;
-    });
-    return res.json({ ok: true, videos });
+    return res.json({ ok: true, videos: videos.slice(0, limit) });
   } catch { return res.status(500).json({ ok: false, error: "Could not load videos." }); }
 });
 
@@ -124,7 +114,7 @@ app.post("/api/media/videos/:videoId/view", async (req, res) => {
     const snapshot = await videoRef.get();
     if (!snapshot.exists()) return res.status(404).json({ ok: false, error: "Video not found." });
     const video = snapshot.val() || {};
-    if (String(video.storage?.provider || video.telegram?.provider || "") !== "telegram") return res.status(404).json({ ok: false, error: "Video not found." });
+    if (!video.id) return res.status(404).json({ ok: false, error: "Video not found." });
     const result = await videoRef.child("views").transaction((current) => (Number(current) || 0) + 1);
     await updateCanonicalVideoViews({ db, uid: video.ownerUid, videoId, views: Number(result.snapshot.val()) || 0 });
     return res.json({ ok: true, videoId, views: Number(result.snapshot.val()) || 0 });
@@ -142,7 +132,6 @@ app.post("/api/media/videos/:videoId/delete", async (req, res) => {
     if (!snapshot.exists()) return res.json({ ok: true, videoId, alreadyDeleted: true });
     const video = snapshot.val() || {};
     if (String(video.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own video." });
-    if (String(video.storage?.provider || video.telegram?.provider || "") !== "telegram") return res.status(404).json({ ok: false, error: "Video not found." });
     await videoRef.remove();
     await deleteCanonicalVideo({ db, uid: user.uid, videoId });
     await db.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
