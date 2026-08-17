@@ -65,6 +65,7 @@ async function reserveBot(db, bots) {
   });
   return chosen;
 }
+
 async function releaseBot(db, bot) {
   if (!db || !bot) return;
   await db.ref(`telegramBotState/${bot.key}`).transaction((current) => {
@@ -72,6 +73,7 @@ async function releaseBot(db, bot) {
     return { active: Math.max(0, Number(state.active || 0) - 1), updatedAt: Date.now() };
   });
 }
+
 function getBotByKey(bots, key) {
   return bots.find((bot) => bot.key === String(key || "")) || null;
 }
@@ -141,10 +143,46 @@ export function createTelegramChunkRouter({ express, db, auth, saveVideo }) {
     if (!totalChunks || !Number.isFinite(size) || size <= 0 || size > 20 * 1024 * 1024 * 1024 || !title) {
       return res.status(400).json({ ok: false, error: "Invalid upload metadata." });
     }
-    const uploadRef = db.ref(`telegramUploads/${req.telegramUser.uid}`).push();
-    const uploadId = uploadRef.key;
-    await uploadRef.set({ uploadId, ownerUid: req.telegramUser.uid, fileName, mimeType, mediaType, title, caption, privacy, allowComments, allowDuet, category, tags, location, duration: Number.isFinite(duration) ? duration : 0, width: Number.isFinite(width) ? width : 0, height: Number.isFinite(height) ? height : 0, size, totalChunks, chunkSize: CHUNK_SIZE, uploadedChunks: 0, status: "uploading", createdAt: Date.now(), updatedAt: Date.now() });
-    return res.status(201).json({ ok: true, uploadId, chunkSize: CHUNK_SIZE, totalChunks });
+
+    const bots = buildBotPool();
+    if (!bots.length) return res.status(503).json({ ok: false, error: "Telegram storage is not configured." });
+    const assignedBot = await reserveBot(db, bots);
+
+    try {
+      const uploadRef = db.ref(`telegramUploads/${req.telegramUser.uid}`).push();
+      const uploadId = uploadRef.key;
+      await uploadRef.set({
+        uploadId,
+        ownerUid: req.telegramUser.uid,
+        fileName,
+        mimeType,
+        mediaType,
+        title,
+        caption,
+        privacy,
+        allowComments,
+        allowDuet,
+        category,
+        tags,
+        location,
+        duration: Number.isFinite(duration) ? duration : 0,
+        width: Number.isFinite(width) ? width : 0,
+        height: Number.isFinite(height) ? height : 0,
+        size,
+        totalChunks,
+        chunkSize: CHUNK_SIZE,
+        assignedBotKey: assignedBot.key,
+        assignedBotIndex: assignedBot.index,
+        uploadedChunks: 0,
+        status: "uploading",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      return res.status(201).json({ ok: true, uploadId, chunkSize: CHUNK_SIZE, totalChunks, assignedBotIndex: assignedBot.index });
+    } catch (error) {
+      await releaseBot(db, assignedBot).catch(() => {});
+      throw error;
+    }
   });
 
   router.post("/api/telegram/uploads/:uploadId/chunks/:chunkIndex", requireUser, express.raw({ type: "*/*", limit: "2mb" }), async (req, res) => {
@@ -161,18 +199,21 @@ export function createTelegramChunkRouter({ express, db, auth, saveVideo }) {
     const existingRef = uploadRef.child(`chunks/${chunkIndex}`);
     const existing = await existingRef.get();
     if (existing.exists()) return res.json({ ok: true, duplicate: true, chunk: existing.val(), uploadId });
+
     const bots = buildBotPool();
     if (!bots.length) return res.status(503).json({ ok: false, error: "Telegram storage is not configured." });
-    const bot = await reserveBot(db, bots);
+    const assignedBot = getBotByKey(bots, upload.assignedBotKey) || (upload.assignedBotIndex ? bots.find((bot) => bot.index === Number(upload.assignedBotIndex)) : null);
+    if (!assignedBot) return res.status(503).json({ ok: false, error: "The assigned Telegram bot is no longer configured." });
+
     try {
       const form = new FormData();
-      form.set("chat_id", bot.chatId);
+      form.set("chat_id", assignedBot.chatId);
       form.set("caption", `INDO_CHUNK ${uploadId} ${chunkIndex + 1}/${totalChunks}`);
       form.set("document", new Blob([req.body], { type: String(upload.mimeType || "application/octet-stream") }), `${safeFileName(upload.fileName)}.part${String(chunkIndex).padStart(6, "0")}`);
-      const message = await telegramCall(bot, "sendDocument", form);
+      const message = await telegramCall(assignedBot, "sendDocument", form);
       const document = message?.document;
       if (!document?.file_id) throw new Error("Telegram did not return a document file_id.");
-      const chunk = { index: chunkIndex, size: req.body.length, botKey: bot.key, botIndex: bot.index, fileId: String(document.file_id), fileUniqueId: String(document.file_unique_id || ""), messageId: Number(message.message_id || 0), uploadedAt: Date.now() };
+      const chunk = { index: chunkIndex, size: req.body.length, botKey: assignedBot.key, botIndex: assignedBot.index, fileId: String(document.file_id), fileUniqueId: String(document.file_unique_id || ""), messageId: Number(message.message_id || 0), uploadedAt: Date.now() };
       await existingRef.set(chunk);
       const countResult = await uploadRef.child("uploadedChunks").transaction((current) => Number(current || 0) + 1);
       const uploadedChunks = Number(countResult.snapshot.val() || 0);
@@ -181,8 +222,6 @@ export function createTelegramChunkRouter({ express, db, auth, saveVideo }) {
     } catch (error) {
       if (Number(error?.status) === 429) return res.status(503).json({ ok: false, error: "Telegram is busy. Please retry this chunk.", retryAfter: Number(error?.telegramResponse?.parameters?.retry_after || 5) });
       return res.status(502).json({ ok: false, error: error?.message || "Telegram upload failed." });
-    } finally {
-      await releaseBot(db, bot);
     }
   });
 
@@ -207,6 +246,8 @@ export function createTelegramChunkRouter({ express, db, auth, saveVideo }) {
     if (typeof saveVideo !== "function") return res.status(500).json({ ok: false, error: "Video publisher is unavailable." });
     const video = await saveVideo({ db, user: req.telegramUser, upload, streamUrl: `${req.protocol || "https"}://${req.get("host")}/api/media/videos/telegram/${encodeURIComponent(uploadId)}/stream` });
     await uploadRef.update({ status: "complete", videoId: video.id, updatedAt: Date.now() });
+    const assignedBot = getBotByKey(buildBotPool(), upload.assignedBotKey) || null;
+    await releaseBot(db, assignedBot);
     return res.status(201).json({ ok: true, video });
   });
 
