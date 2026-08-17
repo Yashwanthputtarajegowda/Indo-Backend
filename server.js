@@ -23,7 +23,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260817-google-telegram-v4-cors";
+const BACKEND_VERSION = "20260817-google-telegram-v3";
 const CANONICAL_SCHEMA_VERSION = 3;
 const PRODUCTION_FRONTEND_ORIGINS = ["https://yashwanthputtarajegowda.github.io"];
 const CORS_ORIGINS = Array.from(new Set([...PRODUCTION_FRONTEND_ORIGINS, ...String(process.env.CORS_ORIGINS || "http://localhost:5173,http://localhost:3000").split(",")].map((origin) => origin.trim().replace(/\/$/, "")).filter(Boolean)));
@@ -41,22 +41,11 @@ const firebaseAdmin = initFirebaseAdmin();
 const db = firebaseAdmin ? getDatabaseWithUrl(DATABASE_URL, firebaseAdmin) : null;
 const auth = firebaseAdmin ? admin.auth(firebaseAdmin) : null;
 
-function isAllowedOrigin(origin) {
-  if (!origin) return true;
-  const normalized = String(origin).replace(/\/$/, "");
-  if (CORS_ORIGINS.includes(normalized)) return true;
-  // GitHub Pages can serve the app from the user's Pages host, and local development
-  // commonly uses arbitrary Vite/preview ports. Neither uses cookies for API auth;
-  // authentication is carried explicitly in the Firebase Bearer token.
-  if (/^https:\/\/[a-z0-9-]+\.github\.io$/i.test(normalized)) return true;
-  if (/^https?:\/\/localhost:\d+$/i.test(normalized)) return true;
-  if (/^https?:\/\/127\.0\.0\.1:\d+$/i.test(normalized)) return true;
-  return false;
-}
-
 const corsOptions = {
   origin(origin, callback) {
-    if (isAllowedOrigin(origin)) return callback(null, true);
+    if (!origin) return callback(null, true);
+    const normalized = String(origin).replace(/\/$/, "");
+    if (CORS_ORIGINS.includes(normalized)) return callback(null, true);
     return callback(new Error("Origin is not allowed by CORS."));
   },
   methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
