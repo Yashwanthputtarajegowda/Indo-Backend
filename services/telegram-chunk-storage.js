@@ -237,7 +237,7 @@ export function createTelegramChunkRouter({ express, db, auth, saveVideo }) {
     let end = Math.max(0, totalSize - 1);
     if (range.startsWith("bytes=")) {
       const match = /^bytes=(\d*)-(\d*)$/i.exec(range);
-      if (!match) return res.status(416).setHeader("Content-Range", `bytes */${totalSize}`).end();
+      if (!match || (!match[1] && !match[2])) return res.status(416).setHeader("Content-Range", `bytes */${totalSize}`).end();
       if (match[1]) start = Number(match[1]);
       end = match[2] ? Number(match[2]) : totalSize - 1;
       if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= totalSize) return res.status(416).setHeader("Content-Range", `bytes */${totalSize}`).end();
@@ -247,6 +247,11 @@ export function createTelegramChunkRouter({ express, db, auth, saveVideo }) {
     const firstChunk = Math.floor(start / chunkSize);
     const lastChunk = Math.floor(end / chunkSize);
     const partial = Boolean(range);
+    res.setHeader("Access-Control-Allow-Origin", "https://yashwanthputtarajegowda.github.io");
+    res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, Accept");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Type");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     res.status(partial ? 206 : 200);
     res.setHeader("Content-Type", String(upload.mimeType || "video/mp4"));
     res.setHeader("Accept-Ranges", "bytes");
@@ -264,7 +269,8 @@ export function createTelegramChunkRouter({ express, db, auth, saveVideo }) {
       }
       return res.end();
     } catch (error) {
-      if (!res.headersSent) return res.status(502).json({ ok: false, error: error?.message || "Video stream is temporarily unavailable." });
+      console.error("Telegram video stream failed:", error?.message || error);
+      if (!res.headersSent) return res.status(502).json({ ok: false, error: "Video stream is temporarily unavailable." });
       return res.end();
     }
   });
