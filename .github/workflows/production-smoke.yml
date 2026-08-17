@@ -27,15 +27,15 @@ jobs:
           curl --silent --show-error --max-time 10 "$BASE_URL/api/health" || true
           exit 1
 
-      - name: Check production CORS preflight for upload
+      - name: Check production CORS preflight for canonical upload route
         run: |
           set -euo pipefail
           response=$(curl --silent --show-error --max-time 20 -D - -o /dev/null \
             -X OPTIONS \
             -H 'Origin: https://yashwanthputtarajegowda.github.io' \
             -H 'Access-Control-Request-Method: POST' \
-            -H 'Access-Control-Request-Headers: authorization,content-type,x-upload-id,x-file-name,x-file-size,x-mime-type,x-media-type' \
-            "$BASE_URL/api/telegram/uploads")
+            -H 'Access-Control-Request-Headers: authorization,content-type,x-upload-id,x-file-name,x-file-size,x-mime-type,x-media-type,x-title,x-caption,x-privacy,x-allow-comments,x-allow-duet,x-category,x-tags,x-location,x-duration,x-width,x-height' \
+            "$BASE_URL/api/media/videos/upload-telegram")
           printf '%s\n' "$response"
           printf '%s\n' "$response" | grep -Eiq '^access-control-allow-origin:[[:space:]]*https://yashwanthputtarajegowda.github.io[[:space:]]*$'
           printf '%s\n' "$response" | grep -Eiq '^access-control-allow-methods:'
@@ -46,9 +46,9 @@ jobs:
           set -euo pipefail
           status=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' \
             -X POST \
-            -H 'Content-Type: application/octet-stream' \
+            -H 'Content-Type: video/mp4' \
             --data-binary '' \
-            "$BASE_URL/api/telegram/uploads")
+            "$BASE_URL/api/media/videos/upload-telegram")
           test "$status" = "401"
 
       - name: Telegram storage health is reachable
