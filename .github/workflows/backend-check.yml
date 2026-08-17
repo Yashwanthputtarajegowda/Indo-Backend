@@ -8,6 +8,7 @@ on:
       - "services/**"
       - "routes/**"
       - "scripts/**"
+      - "*.mjs"
       - "package.json"
       - ".github/workflows/backend-check.yml"
   pull_request:
@@ -16,6 +17,7 @@ on:
       - "services/**"
       - "routes/**"
       - "scripts/**"
+      - "*.mjs"
       - "package.json"
       - ".github/workflows/backend-check.yml"
 
@@ -40,12 +42,20 @@ jobs:
       - name: Syntax check
         run: |
           node --check server.js
+          node --check telegram-boot.mjs
           node --check scripts/production-preflight.mjs
 
-      - name: Health-start smoke check
+      - name: Health and Telegram route smoke check
         run: |
-          PORT=3001 node server.js > /tmp/indo-backend.log 2>&1 &
+          PORT=3001 npm start > /tmp/indo-backend.log 2>&1 &
           PID=$!
           trap 'kill $PID 2>/dev/null || true' EXIT
-          sleep 3
+          sleep 4
           curl --fail --silent http://127.0.0.1:3001/api/health
+          curl --fail --silent http://127.0.0.1:3001/api/telegram/storage-health
+          status=$(curl --silent --show-error --max-time 10 -o /dev/null -w '%{http_code}' \
+            -X POST \
+            -H 'Content-Type: application/octet-stream' \
+            --data-binary '' \
+            http://127.0.0.1:3001/api/telegram/uploads)
+          test "$status" = "401"
