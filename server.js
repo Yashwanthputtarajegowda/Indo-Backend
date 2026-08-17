@@ -23,7 +23,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260817-google-telegram-v3";
+const BACKEND_VERSION = "20260817-google-telegram-v4-startup";
 const CANONICAL_SCHEMA_VERSION = 3;
 const PRODUCTION_FRONTEND_ORIGINS = ["https://yashwanthputtarajegowda.github.io"];
 const CORS_ORIGINS = Array.from(new Set([...PRODUCTION_FRONTEND_ORIGINS, ...String(process.env.CORS_ORIGINS || "http://localhost:5173,http://localhost:3000").split(",")].map((origin) => origin.trim().replace(/\/$/, "")).filter(Boolean)));
@@ -177,14 +177,19 @@ app.get("/api/account/me", async (req, res) => {
 app.use((error, _req, res, _next) => { console.error(error); if (res.headersSent) return; return res.status(500).json({ ok: false, error: "Internal server error." }); });
 
 async function start() {
-  if (firebaseAdmin && db) {
-    try {
-      const schemaSnapshot = await db.ref("system/canonicalSchemaVersion/version").get();
-      if (Number(schemaSnapshot.val() || 0) < CANONICAL_SCHEMA_VERSION) await migrateAllUsersToCanonical({ db });
-    } catch (error) { console.warn("Canonical user migration failed:", error?.message || error); }
-    try { await cleanupInactiveAccounts({ db, auth }); } catch (error) { console.warn("Account cleanup failed:", error?.message || error); }
-  }
+  // Cloud Run requires the process to bind to $PORT immediately. Do not block
+  // startup on database migration or cleanup work, which can take much longer.
   app.listen(PORT, () => console.log(`Indo backend listening on port ${PORT}`));
   setInterval(() => cleanupInactiveAccounts({ db, auth }).catch((error) => console.warn("Scheduled account cleanup failed:", error?.message || error)), CLEANUP_INTERVAL_MS).unref?.();
+
+  if (firebaseAdmin && db) {
+    void (async () => {
+      try {
+        const schemaSnapshot = await db.ref("system/canonicalSchemaVersion/version").get();
+        if (Number(schemaSnapshot.val() || 0) < CANONICAL_SCHEMA_VERSION) await migrateAllUsersToCanonical({ db });
+      } catch (error) { console.warn("Canonical user migration failed:", error?.message || error); }
+      try { await cleanupInactiveAccounts({ db, auth }); } catch (error) { console.warn("Account cleanup failed:", error?.message || error); }
+    })();
+  }
 }
 start();
