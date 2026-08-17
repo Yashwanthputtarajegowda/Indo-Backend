@@ -8,17 +8,12 @@ Set these variables in Railway for the production service. Do **not** commit the
 - `FIREBASE_PRIVATE_KEY` — preserve the private-key newlines, or use `\\n` escapes.
 - `FIREBASE_DATABASE_URL`
 
-## Required Cloudinary
-- `CLOUDINARY_CLOUD_NAME`
-- `CLOUDINARY_API_KEY`
-- `CLOUDINARY_API_SECRET`
-
-## Optional Telegram media mirror
+## Required Telegram media storage
 - `TELEGRAM_BOT_TOKEN` — store only in Railway secrets; never commit it.
-- `TELEGRAM_CHAT_ID` — the private channel ID (for the current storage channel this is `-1004346850990`).
-- `TELEGRAM_MIRROR_ENABLED` — set `true` to mirror newly published videos/reels and stories to Telegram; defaults to `true` when the Telegram credentials are present.
+- `TELEGRAM_CHAT_ID` — private Telegram storage channel/chat ID.
+- `TELEGRAM_BOT_TOKEN_1`, `TELEGRAM_CHAT_ID_1`, etc. may be used for additional Telegram storage bots.
 
-The current production flow keeps Cloudinary as the playback source and mirrors new media to Telegram. This avoids a breaking cutover while Telegram Bot API download limits are still a constraint for web playback.
+Videos, reels, and stories are stored and streamed through Telegram. There is no legacy media-storage fallback.
 
 ## Production CORS
 - `CORS_ORIGINS` — set this to the exact production frontend origin(s), comma-separated if more than one.
