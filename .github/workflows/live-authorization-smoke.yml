@@ -15,7 +15,7 @@ jobs:
   live-authz:
     runs-on: ubuntu-latest
     env:
-      BASE_URL: https://indo-backend-production-41b1.up.railway.app
+      BASE_URL: https://indo-backend-456919073297.asia-south1.run.app
       TEST_PROFILE_UID: ${{ inputs.profile_uid || secrets.SECURITY_TEST_PROFILE_UID }}
       USER_A_TOKEN: ${{ secrets.SECURITY_TEST_USER_A_TOKEN }}
       USER_B_TOKEN: ${{ secrets.SECURITY_TEST_USER_B_TOKEN }}
@@ -40,9 +40,10 @@ jobs:
             echo "$method $path -> $code"
             test "$code" = "$expected"
           }
-          check_unauth POST /api/media/signature 401
+          check_unauth POST /api/media/signature 410
           check_unauth PATCH /api/account/contact 401
           check_unauth POST /api/account/delete 401
+          check_unauth POST /api/telegram/uploads 401
 
       - name: Private-profile authorization checks
         if: env.TEST_PROFILE_UID != '' && env.USER_A_TOKEN != ''
@@ -70,7 +71,7 @@ jobs:
             *) cat /tmp/body; exit 1 ;;
           esac
 
-      - name: Token-protected upload-signature check
+      - name: Token-protected legacy signature check
         if: env.USER_A_TOKEN != ''
         run: |
           set -euo pipefail
@@ -80,7 +81,4 @@ jobs:
             -H 'Content-Type: application/json' \
             --data '{"kind":"video"}')
           echo "Authenticated signature request: $code"
-          case "$code" in
-            200|400|401|403|429|503) ;;
-            *) cat /tmp/body; exit 1 ;;
-          esac
+          test "$code" = "410"
