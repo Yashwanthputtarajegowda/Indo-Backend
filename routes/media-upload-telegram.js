@@ -67,7 +67,13 @@ async function fetchTelegramFileBuffer({ token, fileId }) {
   const filePath = String(file?.file_path || "").trim();
   if (!filePath) throw new Error("Telegram file path is missing.");
 
-  const response = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+  const response = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache, no-store, max-age=0",
+      Pragma: "no-cache",
+    },
+  });
   if (!response.ok) throw new Error(`Telegram file download failed (${response.status}).`);
   return Buffer.from(await response.arrayBuffer());
 }
@@ -79,7 +85,12 @@ function setStreamHeaders(res, { mimeType, total, start, end, partial }) {
     "Content-Type": mimeType || "video/mp4",
     "Content-Length": String(length),
     "Content-Disposition": "inline",
-    "Cache-Control": "public, max-age=3600",
+    // Telegram is the only playback source. Never allow the browser, CDN or
+    // intermediate proxy to reuse a previous video response.
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0",
+    Pragma: "no-cache",
+    Expires: "0",
+    "Surrogate-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
   });
   if (partial) {
@@ -206,14 +217,12 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
     }
   };
 
-  // Canonical upload endpoint.
   router.post(
     "/telegram/uploads",
     express.raw({ type: () => true, limit: "50mb" }),
     uploadHandler,
   );
 
-  // Backward-compatible alias for any older frontend code still cached in a browser.
   router.post(
     "/media/videos/upload-telegram",
     express.raw({ type: () => true, limit: "50mb" }),
@@ -239,16 +248,15 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
       const config = telegramConfig();
       if (!fileId || !config.configured) return res.status(404).json({ ok: false, error: "Telegram video file is unavailable." });
 
-      if (req.method === "HEAD") {
-        const buffer = await fetchTelegramFileBuffer({ token: config.token, fileId });
-        const mimeType = String(video.mimeType || video.telegram?.mimeType || "video/mp4");
-        setStreamHeaders(res, { mimeType, total: buffer.length, start: 0, end: buffer.length - 1, partial: false });
-        return res.end();
-      }
-
       const buffer = await fetchTelegramFileBuffer({ token: config.token, fileId });
       const total = buffer.length;
       if (!total) return res.status(404).json({ ok: false, error: "Telegram video file is empty." });
+
+      if (req.method === "HEAD") {
+        const mimeType = String(video.mimeType || video.telegram?.mimeType || "video/mp4");
+        setStreamHeaders(res, { mimeType, total, start: 0, end: total - 1, partial: false });
+        return res.end();
+      }
 
       let start = 0;
       let end = total - 1;
@@ -284,10 +292,17 @@ export function createTelegramMediaUploadRouter({ db, requireUser }) {
 
   router.get("/telegram/storage-health", (_req, res) => {
     const config = telegramConfig();
+    res.set({
+      "Cache-Control": "no-store, no-cache, max-age=0",
+      Pragma: "no-cache",
+      Expires: "0",
+    });
     res.json({
       ok: true,
       configured: config.configured,
       mode: "single-file",
+      sourceOfTruth: "telegram-bot",
+      cache: "disabled",
       maxVideoBytes: MAX_VIDEO_BYTES,
     });
   });
