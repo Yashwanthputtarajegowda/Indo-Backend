@@ -2,7 +2,6 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import admin from "firebase-admin";
 import { getDatabaseWithUrl } from "firebase-admin/database";
-import { createCloudinarySignature } from "./services/cloudinary-signature.js";
 
 function initFirebase() {
   if (admin.apps.length) return admin.app();
