@@ -23,7 +23,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const DATABASE_URL = process.env.FIREBASE_DATABASE_URL || "https://indo-174f0-default-rtdb.firebaseio.com";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKEND_VERSION = "20260817-google-telegram-v4-startup";
+const BACKEND_VERSION = "20260817-google-telegram-v5-playback";
 const CANONICAL_SCHEMA_VERSION = 3;
 const PRODUCTION_FRONTEND_ORIGINS = ["https://yashwanthputtarajegowda.github.io"];
 const CORS_ORIGINS = Array.from(new Set([...PRODUCTION_FRONTEND_ORIGINS, ...String(process.env.CORS_ORIGINS || "http://localhost:5173,http://localhost:3000").split(",")].map((origin) => origin.trim().replace(/\/$/, "")).filter(Boolean)));
@@ -100,7 +100,19 @@ app.get("/api/media/videos", async (req, res) => {
     let videos = Object.values(snapshot.val() || {}).filter((item) => item && String(item.storage?.provider || item.telegram?.provider || "") === "telegram");
     videos.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     if (type === "video" || type === "reel") videos = videos.filter((item) => (item.mediaType || "video") === type);
-    return res.json({ ok: true, videos: videos.slice(0, limit) });
+    const baseUrl = `${req.protocol || "https"}://${req.get("host")}`;
+    videos = videos.slice(0, limit).map((item) => {
+      const video = { ...item };
+      const provider = String(video.storage?.provider || video.telegram?.provider || "").toLowerCase();
+      if (provider === "telegram" && video.id) {
+        const streamUrl = `${baseUrl}/api/media/videos/${encodeURIComponent(video.id)}/telegram-stream`;
+        video.streamUrl = video.streamUrl || streamUrl;
+        video.videoUrl = video.videoUrl || video.secureUrl || streamUrl;
+        video.secureUrl = video.secureUrl || video.videoUrl || streamUrl;
+      }
+      return video;
+    });
+    return res.json({ ok: true, videos });
   } catch { return res.status(500).json({ ok: false, error: "Could not load videos." }); }
 });
 
@@ -177,8 +189,6 @@ app.get("/api/account/me", async (req, res) => {
 app.use((error, _req, res, _next) => { console.error(error); if (res.headersSent) return; return res.status(500).json({ ok: false, error: "Internal server error." }); });
 
 async function start() {
-  // Cloud Run requires the process to bind to $PORT immediately. Do not block
-  // startup on database migration or cleanup work, which can take much longer.
   app.listen(PORT, () => console.log(`Indo backend listening on port ${PORT}`));
   setInterval(() => cleanupInactiveAccounts({ db, auth }).catch((error) => console.warn("Scheduled account cleanup failed:", error?.message || error)), CLEANUP_INTERVAL_MS).unref?.();
 
