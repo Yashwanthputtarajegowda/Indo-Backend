@@ -12,7 +12,7 @@ import {
   uploadVideoToDrive,
 } from "../services/google-drive-storage.js";
 
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 
 function text(value, max = 500) { return String(value ?? "").trim().slice(0, max); }
 function safeFileName(value) { return text(value, 140).normalize("NFKD").replace(/[^A-Za-z0-9._-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "indo-video.mp4"; }
@@ -62,7 +62,7 @@ export function createGoogleDriveVideoRouter({ db, requireUser }) {
     const mimeType = String(req.headers["content-type"] || "video/mp4").split(";")[0].trim().toLowerCase();
     if (!mimeType.startsWith("video/")) return res.status(400).json({ ok: false, error: "Only video uploads are supported." });
     if (!body.length) return res.status(400).json({ ok: false, error: "Video file is missing." });
-    if (body.length > MAX_VIDEO_BYTES) return res.status(413).json({ ok: false, error: "Video must be 50 MB or smaller." });
+    if (body.length > MAX_VIDEO_BYTES) return res.status(413).json({ ok: false, error: "Video must be 500 MB or smaller." });
     try {
       const profile = (await syncCanonicalUser({ db, uid: user.uid, includeContent: false })).profile;
       const mediaType = String(req.query.mediaType || req.headers["x-media-type"] || "video").toLowerCase() === "reel" ? "reel" : "video";
@@ -103,7 +103,7 @@ export function createGoogleDriveVideoRouter({ db, requireUser }) {
     }
   };
 
-  router.post("/google-drive/videos/upload", express.raw({ type: () => true, limit: "50mb" }), uploadHandler);
+  router.post("/google-drive/videos/upload", express.raw({ type: () => true, limit: "500mb" }), uploadHandler);
 
   const streamHandler = async (req, res) => {
     if (!db) return res.status(503).end();
