@@ -1,5 +1,4 @@
 import express from "express";
-import { Readable } from "node:stream";
 import { canonicalUserRoot, syncCanonicalUser } from "../services/user-canonical.js";
 import { saveCanonicalVideo } from "../services/canonical-content.js";
 import {
@@ -106,18 +105,6 @@ async function persistDriveVideo({ database, user, profile, driveFile, fileName,
   await database.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => (Number(current) || 0) + 1);
   await database.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).transaction((current) => (Number(current) || 0) + 1);
   return video;
-}
-
-function parseRange(rangeHeader, total) {
-  const raw = String(rangeHeader || "").trim();
-  if (!raw) return null;
-  const match = raw.match(/^bytes=(\d*)-(\d*)$/i);
-  if (!match) return null;
-  let start = match[1] ? Number(match[1]) : Math.max(0, total - Number(match[2] || 0));
-  let end = match[2] ? Number(match[2]) : total - 1;
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= total) return null;
-  end = Math.min(end, total - 1);
-  return { start, end };
 }
 
 export function createGoogleDriveVideoRouter({ db, requireUser }) {
@@ -273,29 +260,64 @@ export function createGoogleDriveVideoRouter({ db, requireUser }) {
       if (String(video.storage?.provider || "").toLowerCase() !== "google-drive") return res.status(404).end();
       const fileId = text(video.googleDrive?.fileId, 300);
       if (!fileId) return res.status(404).end();
+
       const file = await getDriveFile(fileId);
-      const total = finiteNumber(file.size, 0);
-      const range = parseRange(req.headers.range, total);
-      const upstream = await getDriveStream(fileId, req.headers.range || "", req.method === "HEAD" ? "HEAD" : "GET");
-      if (!upstream.ok && upstream.status !== 206) return res.status(upstream.status).end();
-      res.set({
+      const total = Math.max(0, finiteNumber(file.size, 0));
+      const rangeHeader = String(req.headers.range || "").trim();
+
+      if (req.method === "HEAD") {
+        res.set({
+          "Cache-Control": "public, max-age=300, s-maxage=300, stale-while-revalidate=60",
+          "Accept-Ranges": "bytes",
+          "Content-Disposition": "inline",
+          "X-Content-Type-Options": "nosniff",
+          "Content-Type": String(file.mimeType || video.mimeType || "video/mp4"),
+        });
+        if (total > 0) res.set("Content-Length", String(total));
+        return res.status(200).end();
+      }
+
+      const upstream = await getDriveStream(fileId, rangeHeader, "GET");
+      if (!upstream.ok || !upstream.body) {
+        console.error("Google Drive media request failed:", upstream.status, upstream.statusText || "", fileId);
+        return res.status(upstream.status || 502).end();
+      }
+
+      const headers = {
         "Cache-Control": "public, max-age=300, s-maxage=300, stale-while-revalidate=60",
-        "Accept-Ranges": "bytes",
+        "Accept-Ranges": String(upstream.headers.get("accept-ranges") || "bytes"),
         "Content-Disposition": "inline",
         "X-Content-Type-Options": "nosniff",
-        "Content-Type": String(file.mimeType || video.mimeType || "video/mp4"),
-      });
-      if (range) {
-        const length = range.end - range.start + 1;
-        res.status(206).set({ "Content-Length": String(length), "Content-Range": `bytes ${range.start}-${range.end}/${total}` });
-      } else if (total > 0) {
-        res.set("Content-Length", String(total));
+        "Content-Type": String(upstream.headers.get("content-type") || file.mimeType || video.mimeType || "video/mp4"),
+      };
+      const contentLength = upstream.headers.get("content-length");
+      const contentRange = upstream.headers.get("content-range");
+      if (contentLength) headers["Content-Length"] = contentLength;
+      if (contentRange) headers["Content-Range"] = contentRange;
+      res.status(upstream.status).set(headers);
+
+      const reader = upstream.body.getReader();
+      const onClose = () => { try { reader.cancel(); } catch {} };
+      res.once("close", onClose);
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!res.write(Buffer.from(value))) await new Promise((resolve) => res.once("drain", resolve));
+        }
+        if (!res.writableEnded) res.end();
+      } catch (err) {
+        console.error("Google Drive stream body failed:", err?.message || err);
+        if (!res.headersSent) res.status(502).end();
+        else res.destroy(err);
+      } finally {
+        res.off("close", onClose);
+        try { reader.releaseLock(); } catch {}
       }
-      if (req.method === "HEAD") return res.end();
-      if (!upstream.body) return res.end();
-      return Readable.fromWeb(upstream.body).pipe(res);
+      return;
     } catch (err) {
-      console.error("Google Drive stream failed:", err?.message || err);
+      console.error("Google Drive stream failed:", err?.stack || err?.message || err);
+      if (res.headersSent) return res.destroy(err);
       return res.status(502).end();
     }
   };
