@@ -7,6 +7,7 @@ import {
   getGoogleDriveAuthorizationUrl,
   getDriveFile,
   getDriveStream,
+  findDriveFolderId,
   googleDriveConfigured,
   uploadVideoToDrive,
 } from "../services/google-drive-storage.js";
@@ -44,12 +45,12 @@ export function createGoogleDriveVideoRouter({ db, requireUser }) {
   router.get("/google-drive/status", async (_req, res) => {
     if (!googleDriveConfigured()) return res.json({ ok: false, configured: false, authorized: false });
     try {
-      const folderId = String(process.env.GOOGLE_DRIVE_FOLDER_ID || "").trim();
-      if (!process.env.GOOGLE_DRIVE_REFRESH_TOKEN) return res.json({ ok: true, configured: true, authorized: false, folderId: folderId || null });
-      const file = folderId ? await getDriveFile(folderId) : null;
-      return res.json({ ok: true, configured: true, authorized: true, folderId: folderId || null, folder: file || null });
+      if (!process.env.GOOGLE_DRIVE_REFRESH_TOKEN) return res.json({ ok: true, configured: true, authorized: false, folderId: null, folder: null });
+      const folderId = await findDriveFolderId();
+      const folder = await getDriveFile(folderId);
+      return res.json({ ok: true, configured: true, authorized: true, folderId, folder });
     } catch (err) {
-      return res.status(502).json({ ok: false, configured: true, authorized: false, error: err?.message || "Google Drive authorization is not working." });
+      return res.status(502).json({ ok: false, configured: true, authorized: false, error: err?.message || "Google Drive authorization or folder access is not working." });
     }
   });
 
