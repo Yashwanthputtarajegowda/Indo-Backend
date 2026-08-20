@@ -98,7 +98,12 @@ export async function getDriveFile(fileId) {
   const params = new URLSearchParams({ fields: "id,name,mimeType,size,trashed" });
   const response = await driveFetch(`/files/${encode(fileId)}?${params.toString()}`);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data?.id || data.trashed) throw new Error(data?.error?.message || "Google Drive file not found.");
+  if (!response.ok || !data?.id || data.trashed) {
+    const error = new Error(data?.error?.message || "Google Drive file not found.");
+    error.status = response.status || 404;
+    error.code = response.status === 404 || data?.trashed ? "DRIVE_FILE_NOT_FOUND" : "DRIVE_FILE_LOOKUP_FAILED";
+    throw error;
+  }
   return data;
 }
 export async function deleteDriveFile(fileId) {
