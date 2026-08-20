@@ -1,4 +1,5 @@
 import { canonicalUserRoot } from "./user-canonical.js";
+import { deleteDriveFile } from "./google-drive-storage.js";
 
 function cleanForRealtime(value) {
   if (value === undefined) return undefined;
@@ -37,13 +38,22 @@ export async function updateCanonicalVideoViews({ db, uid, videoId, views }) {
   await db.ref(`${canonicalUserRoot(uid)}/stats/viewsCount`).transaction((current) => Math.max(0, Number(current) || 0) + 1);
 }
 
-export async function deleteCanonicalVideo({ db, uid, videoId }) {
+export async function deleteCanonicalVideo({ db, uid, videoId, googleDriveFileId = "" }) {
   if (!db || !uid || !videoId) return;
+
   await db.ref().update({
     [`${canonicalUserRoot(uid)}/content/posts/${videoId}`]: null,
     [`${canonicalUserRoot(uid)}/content/videos/${videoId}`]: null,
     [`${canonicalUserRoot(uid)}/engagement/videos/${videoId}`]: null,
+    [`videoLikes/${videoId}`]: null,
+    [`videoComments/${videoId}`]: null,
+    [`videoSaves/${videoId}`]: null,
+    [`googleDriveUploadSessions/${videoId}`]: null,
   });
+
+  if (googleDriveFileId) {
+    await deleteDriveFile(googleDriveFileId);
+  }
 }
 
 export async function saveCanonicalStory({ db, uid, story }) {
