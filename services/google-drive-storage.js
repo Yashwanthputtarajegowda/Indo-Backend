@@ -31,16 +31,39 @@ export async function exchangeAuthorizationCode(code) {
   if (!response.ok || !data?.refresh_token) throw new Error(data?.error_description || "Google did not return a refresh token. Re-authorize with consent.");
   return data;
 }
+
+let cachedDriveAccessToken = "";
+let cachedDriveAccessTokenExpiresAt = 0;
+let driveTokenRefreshPromise = null;
+
 async function getAccessToken() {
-  const refreshToken = env("GOOGLE_DRIVE_REFRESH_TOKEN");
-  if (!refreshToken) throw new Error("Google Drive is not authorized yet. Open /api/google-drive/auth first.");
-  const { clientId, clientSecret } = requireConfig();
-  const body = new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: "refresh_token" });
-  const response = await fetch(OAUTH_TOKEN_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data?.access_token) throw new Error(data?.error_description || "Could not refresh the Google Drive access token.");
-  return data.access_token;
+  const now = Date.now();
+  if (cachedDriveAccessToken && now < cachedDriveAccessTokenExpiresAt - 60_000) {
+    return cachedDriveAccessToken;
+  }
+  if (driveTokenRefreshPromise) return driveTokenRefreshPromise;
+
+  driveTokenRefreshPromise = (async () => {
+    const refreshToken = env("GOOGLE_DRIVE_REFRESH_TOKEN");
+    if (!refreshToken) throw new Error("Google Drive is not authorized yet. Open /api/google-drive/auth first.");
+    const { clientId, clientSecret } = requireConfig();
+    const body = new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: "refresh_token" });
+    const response = await fetch(OAUTH_TOKEN_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data?.access_token) throw new Error(data?.error_description || "Could not refresh the Google Drive access token.");
+    cachedDriveAccessToken = String(data.access_token);
+    const expiresInSeconds = Math.max(60, Number(data.expires_in) || 3600);
+    cachedDriveAccessTokenExpiresAt = Date.now() + expiresInSeconds * 1000;
+    return cachedDriveAccessToken;
+  })();
+
+  try {
+    return await driveTokenRefreshPromise;
+  } finally {
+    driveTokenRefreshPromise = null;
+  }
 }
+
 async function driveFetch(path, init = {}) {
   const token = await getAccessToken();
   const headers = new Headers(init.headers || {});
@@ -63,8 +86,7 @@ export async function startResumableDriveUpload({ fileName, mimeType, folderId }
   const resolvedFolderId = String(folderId || await findDriveFolderId()).trim();
   if (!resolvedFolderId) throw new Error("Google Drive storage folder is not configured.");
   const metadata = { name: fileName, parents: [resolvedFolderId], mimeType };
-  const token = await getAccessToken();
-  const response = await fetch(`${DRIVE_UPLOAD_API}/files?uploadType=resumable&fields=id,name,mimeType,size,webContentLink`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": mimeType }, body: JSON.stringify(metadata) });
+  const response = await driveFetch(`/files?uploadType=resumable&fields=id,name,mimeType,size,webContentLink`, { method: "POST", headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": mimeType }, body: JSON.stringify(metadata) });
   if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data?.error?.message || `Could not start Google Drive upload (${response.status}).`); }
   const sessionUrl = String(response.headers.get("location") || "").trim();
   if (!sessionUrl) throw new Error("Google Drive did not return a resumable upload session.");
