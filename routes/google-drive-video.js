@@ -281,9 +281,17 @@ export function createGoogleDriveVideoRouter({ db, requireUser }) {
       const fileId = text(video.googleDrive?.fileId, 300);
       if (!fileId) return res.status(404).end();
 
-      const file = await getDriveFile(fileId);
-      const total = Math.max(0, finiteNumber(file.size, 0));
       const rangeHeader = String(req.headers.range || "").trim();
+      const total = Math.max(0, finiteNumber(video.googleDrive?.size, 0));
+      const mimeType = String(video.googleDrive?.mimeType || video.mimeType || "video/mp4");
+      let resolvedTotal = total;
+      let resolvedMimeType = mimeType;
+
+      if (req.method === "HEAD" && resolvedTotal <= 0) {
+        const file = await getDriveFile(fileId);
+        resolvedTotal = Math.max(0, finiteNumber(file.size, 0));
+        resolvedMimeType = String(file.mimeType || resolvedMimeType);
+      }
 
       if (req.method === "HEAD") {
         res.set({
@@ -291,13 +299,13 @@ export function createGoogleDriveVideoRouter({ db, requireUser }) {
           "Accept-Ranges": "bytes",
           "Content-Disposition": "inline",
           "X-Content-Type-Options": "nosniff",
-          "Content-Type": String(file.mimeType || video.mimeType || "video/mp4"),
+          "Content-Type": resolvedMimeType,
         });
-        if (total > 0) res.set("Content-Length", String(total));
+        if (resolvedTotal > 0) res.set("Content-Length", String(resolvedTotal));
         return res.status(200).end();
       }
 
-      const driveRange = normalizeDriveRange(rangeHeader, total);
+      const driveRange = normalizeDriveRange(rangeHeader, resolvedTotal);
       const upstream = await getDriveStream(fileId, driveRange, "GET");
       if (!upstream.ok || !upstream.body) {
         console.error("Google Drive media request failed:", upstream.status, upstream.statusText || "", fileId, driveRange);
@@ -309,7 +317,7 @@ export function createGoogleDriveVideoRouter({ db, requireUser }) {
         "Accept-Ranges": String(upstream.headers.get("accept-ranges") || "bytes"),
         "Content-Disposition": "inline",
         "X-Content-Type-Options": "nosniff",
-        "Content-Type": String(upstream.headers.get("content-type") || file.mimeType || video.mimeType || "video/mp4"),
+        "Content-Type": String(upstream.headers.get("content-type") || resolvedMimeType),
       };
       const contentLength = upstream.headers.get("content-length");
       const contentRange = upstream.headers.get("content-range");
