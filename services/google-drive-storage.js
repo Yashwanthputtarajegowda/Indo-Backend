@@ -101,6 +101,15 @@ export async function getDriveFile(fileId) {
   if (!response.ok || !data?.id || data.trashed) throw new Error(data?.error?.message || "Google Drive file not found.");
   return data;
 }
+export async function deleteDriveFile(fileId) {
+  const id = String(fileId || "").trim();
+  if (!id) return { deleted: false, missing: true };
+  const response = await driveFetch(`/files/${encode(id)}`, { method: "DELETE" });
+  if (response.status === 204 || response.status === 200) return { deleted: true, fileId: id };
+  if (response.status === 404) return { deleted: false, alreadyMissing: true, fileId: id };
+  const data = await response.json().catch(() => ({}));
+  throw new Error(data?.error?.message || `Could not delete Google Drive file (${response.status}).`);
+}
 export async function getDriveStream(fileId, range = "", method = "GET") {
   const headers = { Accept: "video/*,*/*;q=0.8" };
   if (range) headers.Range = range;
