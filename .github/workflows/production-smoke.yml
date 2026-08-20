@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASE_URL: https://indo-backend-456919073297.asia-south1.run.app
-      EXPECTED_BACKEND_VERSION: 20260817-google-telegram-v3
+      EXPECTED_BACKEND_VERSION: 20260820-google-drive-v1
     steps:
       - name: Wait for deployed backend revision
         run: |
@@ -27,42 +27,33 @@ jobs:
           curl --silent --show-error --max-time 10 "$BASE_URL/api/health" || true
           exit 1
 
-      - name: Check production CORS preflight for canonical upload route
+      - name: Check production CORS preflight for Google Drive upload route
         run: |
           set -euo pipefail
           response=$(curl --silent --show-error --max-time 20 -D - -o /dev/null \
             -X OPTIONS \
             -H 'Origin: https://yashwanthputtarajegowda.github.io' \
             -H 'Access-Control-Request-Method: POST' \
-            -H 'Access-Control-Request-Headers: authorization,content-type,x-upload-id,x-file-name,x-file-size,x-mime-type,x-media-type,x-title,x-caption,x-privacy,x-allow-comments,x-allow-duet,x-category,x-tags,x-location,x-duration,x-width,x-height' \
-            "$BASE_URL/api/media/videos/upload-telegram")
+            -H 'Access-Control-Request-Headers: authorization,content-type' \
+            "$BASE_URL/api/google-drive/videos/upload-resumable/init")
           printf '%s\n' "$response"
           printf '%s\n' "$response" | grep -Eiq '^access-control-allow-origin:[[:space:]]*https://yashwanthputtarajegowda.github.io[[:space:]]*$'
           printf '%s\n' "$response" | grep -Eiq '^access-control-allow-methods:'
-          printf '%s\n' "$response" | grep -Eiq '^access-control-allow-headers:.*x-upload-id'
 
-      - name: Protected Telegram upload rejects anonymous access
+      - name: Google Drive status route is reachable
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 20 "$BASE_URL/api/google-drive/status"
+
+      - name: Protected Google Drive upload rejects anonymous access
         run: |
           set -euo pipefail
           status=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' \
             -X POST \
-            -H 'Content-Type: video/mp4' \
-            --data-binary '' \
-            "$BASE_URL/api/media/videos/upload-telegram")
+            -H 'Content-Type: application/json' \
+            --data '{"totalSize":1,"mimeType":"video/mp4","fileName":"smoke.mp4"}' \
+            "$BASE_URL/api/google-drive/videos/upload-resumable/init")
           test "$status" = "401"
-
-      - name: Telegram storage health is reachable
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --max-time 20 "$BASE_URL/api/telegram/storage-health"
-
-      - name: Legacy video view rejects anonymous access
-        run: |
-          set -euo pipefail
-          status=$(curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' \
-            -X POST \
-            "$BASE_URL/api/media/videos/test/view")
-          test "$status" = "200" -o "$status" = "404"
 
       - name: Account contact rejects anonymous access
         run: |
