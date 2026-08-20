@@ -41,19 +41,26 @@ export async function updateCanonicalVideoViews({ db, uid, videoId, views }) {
 export async function deleteCanonicalVideo({ db, uid, videoId, googleDriveFileId = "" }) {
   if (!db || !uid || !videoId) return;
 
+  let driveFileId = String(googleDriveFileId || "").trim();
+  if (!driveFileId) {
+    const snapshot = await db.ref(`videos/${videoId}`).get();
+    const video = snapshot.exists() ? snapshot.val() || {} : {};
+    driveFileId = String(video?.googleDrive?.fileId || "").trim();
+  }
+
+  if (driveFileId) {
+    await deleteDriveFile(driveFileId);
+  }
+
   await db.ref().update({
+    [`videos/${videoId}`]: null,
     [`${canonicalUserRoot(uid)}/content/posts/${videoId}`]: null,
     [`${canonicalUserRoot(uid)}/content/videos/${videoId}`]: null,
     [`${canonicalUserRoot(uid)}/engagement/videos/${videoId}`]: null,
     [`videoLikes/${videoId}`]: null,
     [`videoComments/${videoId}`]: null,
     [`videoSaves/${videoId}`]: null,
-    [`googleDriveUploadSessions/${videoId}`]: null,
   });
-
-  if (googleDriveFileId) {
-    await deleteDriveFile(googleDriveFileId);
-  }
 }
 
 export async function saveCanonicalStory({ db, uid, story }) {
