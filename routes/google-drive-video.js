@@ -16,6 +16,10 @@ const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 function text(value, max = 500) { return String(value ?? "").trim().slice(0, max); }
 function safeFileName(value) { return text(value, 140).normalize("NFKD").replace(/[^A-Za-z0-9._-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "indo-video.mp4"; }
 function bool(value, fallback = true) { if (value === undefined || value === null || value === "") return fallback; return String(value).toLowerCase() !== "false"; }
+function finiteNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 function setStreamHeaders(res) { res.set({ "Cache-Control": "public, max-age=300, s-maxage=300, stale-while-revalidate=60", "Accept-Ranges": "bytes", "Content-Disposition": "inline", "X-Content-Type-Options": "nosniff" }); }
 
 export function createGoogleDriveVideoRouter({ db, requireUser }) {
@@ -69,28 +73,28 @@ export function createGoogleDriveVideoRouter({ db, requireUser }) {
       const privacyRaw = text(req.query.privacy || req.headers["x-privacy"] || "public", 20);
       const privacy = ["public", "followers", "private"].includes(privacyRaw) ? privacyRaw : "public";
       const tags = String(req.query.tags || req.headers["x-tags"] || "").split(",").map((v) => v.trim().replace(/^#/, "")).filter(Boolean).slice(0, 20);
-      const duration = Math.max(0, Number(req.query.duration || req.headers["x-duration"]) || 0);
-      const width = Math.max(0, Number(req.query.width || req.headers["x-width"]) || 0);
-      const height = Math.max(0, Number(req.query.height || req.headers["x-height"]) || 0);
+      const duration = Math.max(0, finiteNumber(req.query.duration || req.headers["x-duration"]));
+      const width = Math.max(0, finiteNumber(req.query.width || req.headers["x-width"]));
+      const height = Math.max(0, finiteNumber(req.query.height || req.headers["x-height"]));
       const fileName = safeFileName(req.query.fileName || req.headers["x-file-name"] || "indo-video.mp4");
       const driveFile = await uploadVideoToDrive({ body, fileName, mimeType });
       const videoRef = db.ref("videos").push();
       const videoId = String(videoRef.key);
       const baseUrl = `${req.protocol || "https"}://${req.get("host")}`;
-      const streamUrl = `${baseUrl}/api/google-drive/videos/${encodeURIComponent(videoId)}/stream`;
+      const driveSize = finiteNumber(driveFile?.size, body.length);
       const video = {
         id: videoId, mediaType, mimeType, ownerUid: user.uid,
-        creator: profile.username || `@${String(user.uid).slice(0, 8)}`, creatorName: profile.name || "Indo User",
+        creator: String(profile.username || `@${String(user.uid).slice(0, 8)}`), creatorName: String(profile.name || "Indo User"),
         title, caption, description: caption, secureUrl: streamUrl, videoUrl: streamUrl, streamUrl,
         privacy, allowComments: bool(req.query.allowComments ?? req.headers["x-allow-comments"], true), allowDuet: bool(req.query.allowDuet ?? req.headers["x-allow-duet"], true),
         category: text(req.query.category || req.headers["x-category"], 60), tags,
         location: text(req.query.location || req.headers["x-location"], 120), duration, width, height,
-        views: 0, likes: 0, comments: 0, shares: 0, saves: 0, createdAt: admin.database.ServerValue.TIMESTAMP,
+        views: 0, likes: 0, comments: 0, shares: 0, saves: 0, createdAt: Date.now(),
         storage: { provider: "google-drive", mode: "backend-range-stream" },
-        googleDrive: { provider: "google-drive", fileId: String(driveFile.id), fileName: String(driveFile.name || fileName), mimeType, size: Number(driveFile.size || body.length), folderId: String(driveFile.folderId || "") },
+        googleDrive: { provider: "google-drive", fileId: String(driveFile.id), fileName: String(driveFile.name || fileName), mimeType, size: driveSize, folderId: String(driveFile.folderId || "") },
       };
       await videoRef.set(video);
-      await saveCanonicalVideo({ db, uid: user.uid, video: { ...video, createdAt: Date.now() } });
+      await saveCanonicalVideo({ db, uid: user.uid, video });
       await db.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => (Number(current) || 0) + 1);
       await db.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).transaction((current) => (Number(current) || 0) + 1);
       return res.status(201).json({ ok: true, video });
@@ -117,7 +121,7 @@ export function createGoogleDriveVideoRouter({ db, requireUser }) {
       const upstream = await getDriveStream(fileId, range, req.method === "HEAD" ? "HEAD" : "GET");
       if (!upstream.ok && upstream.status !== 206) return res.status(upstream.status === 403 ? 502 : upstream.status).end();
       const mimeType = String(upstream.headers.get("content-type") || metadata.mimeType || video.mimeType || "video/mp4");
-      const length = Number(upstream.headers.get("content-length") || metadata.size || 0);
+      const length = finiteNumber(upstream.headers.get("content-length") || metadata.size, 0);
       const contentRange = String(upstream.headers.get("content-range") || "");
       setStreamHeaders(res);
       res.set("Content-Type", mimeType);
