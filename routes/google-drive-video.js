@@ -107,6 +107,26 @@ async function persistDriveVideo({ database, user, profile, driveFile, fileName,
   return video;
 }
 
+function normalizeDriveRange(rangeHeader, total) {
+  const raw = String(rangeHeader || "").trim();
+  if (!raw || !Number.isFinite(total) || total <= 0) return "";
+  const match = raw.match(/^bytes=(\d*)-(\d*)$/i);
+  if (!match) return "";
+  let start = match[1] ? Number(match[1]) : null;
+  let end = match[2] ? Number(match[2]) : null;
+  if (start === null && end !== null) {
+    const suffixLength = Math.max(0, end);
+    if (!suffixLength) return "";
+    start = Math.max(0, total - suffixLength);
+    end = total - 1;
+  } else if (start !== null && end === null) {
+    end = total - 1;
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= total) return "";
+  end = Math.min(end, total - 1);
+  return `bytes=${start}-${end}`;
+}
+
 export function createGoogleDriveVideoRouter({ db, requireUser }) {
   const router = express.Router();
 
@@ -277,9 +297,10 @@ export function createGoogleDriveVideoRouter({ db, requireUser }) {
         return res.status(200).end();
       }
 
-      const upstream = await getDriveStream(fileId, rangeHeader, "GET");
+      const driveRange = normalizeDriveRange(rangeHeader, total);
+      const upstream = await getDriveStream(fileId, driveRange, "GET");
       if (!upstream.ok || !upstream.body) {
-        console.error("Google Drive media request failed:", upstream.status, upstream.statusText || "", fileId);
+        console.error("Google Drive media request failed:", upstream.status, upstream.statusText || "", fileId, driveRange);
         return res.status(upstream.status || 502).end();
       }
 
