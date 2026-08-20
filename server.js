@@ -169,12 +169,15 @@ app.post("/api/media/videos/:videoId/delete", async (req, res) => {
     if (!snapshot.exists()) return res.json({ ok: true, videoId, alreadyDeleted: true });
     const video = snapshot.val() || {};
     if (String(video.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own video." });
-    await videoRef.remove();
-    await deleteCanonicalVideo({ db, uid: user.uid, videoId });
+    const googleDriveFileId = String(video.googleDrive?.fileId || "").trim();
+    await deleteCanonicalVideo({ db, uid: user.uid, videoId, googleDriveFileId });
     await db.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
     await db.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
-    return res.json({ ok: true, videoId, deleted: true });
-  } catch { return res.status(500).json({ ok: false, error: "Could not delete video." }); }
+    return res.json({ ok: true, videoId, deleted: true, googleDriveFileId: Boolean(googleDriveFileId) });
+  } catch (error) {
+    console.error("Video delete failed:", error?.stack || error?.message || error);
+    return res.status(500).json({ ok: false, error: "Could not delete video." });
+  }
 });
 
 app.get("/api/account/profile/:username", async (req, res) => {
@@ -208,24 +211,32 @@ app.get("/api/account/me", async (req, res) => {
   if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
   try {
     const canonical = await syncCanonicalUser({ db, uid: user.uid, includeContent: true });
-    return res.json({ ok: true, profile: canonical.profile, stats: canonical.stats, social: canonical.social, private: canonical.profilePrivate });
-  } catch { return res.status(500).json({ ok: false, error: "Could not load profile." }); }
+    return res.json({ ok: true, profile: canonical.profile, stats: canonical.stats, settings: canonical.settings, social: canonical.social, content: canonical.content });
+  } catch { return res.status(500).json({ ok: false, error: "Could not load account." }); }
 });
 
-app.use((error, _req, res, _next) => { console.error(error); if (res.headersSent) return; return res.status(500).json({ ok: false, error: "Internal server error." }); });
+app.get("/api/account/me/content", async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  try {
+    const canonical = await syncCanonicalUser({ db, uid: user.uid, includeContent: true });
+    return res.json({ ok: true, content: canonical.content });
+  } catch { return res.status(500).json({ ok: false, error: "Could not load account content." }); }
+});
 
-async function start() {
-  app.listen(PORT, () => console.log(`Indo backend listening on port ${PORT}`));
-  setInterval(() => cleanupInactiveAccounts({ db, auth }).catch((error) => console.warn("Scheduled account cleanup failed:", error?.message || error)), CLEANUP_INTERVAL_MS).unref?.();
-
-  if (firebaseAdmin && db) {
-    void (async () => {
-      try {
-        const schemaSnapshot = await db.ref("system/canonicalSchemaVersion/version").get();
-        if (Number(schemaSnapshot.val() || 0) < CANONICAL_SCHEMA_VERSION) await migrateAllUsersToCanonical({ db });
-      } catch (error) { console.warn("Canonical user migration failed:", error?.message || error); }
-      try { await cleanupInactiveAccounts({ db, auth }); } catch (error) { console.warn("Account cleanup failed:", error?.message || error); }
-    })();
-  }
+async function runCleanup() {
+  if (!db) return;
+  try { await cleanupInactiveAccounts({ db, auth }); } catch (error) { console.error("Inactive account cleanup failed:", error?.message || error); }
 }
-start();
+
+setInterval(runCleanup, CLEANUP_INTERVAL_MS).unref();
+runCleanup();
+
+app.use((error, _req, res, _next) => {
+  if (res.headersSent) return;
+  console.error("Unhandled backend error:", error?.stack || error?.message || error);
+  return res.status(500).json({ ok: false, error: "Internal server error." });
+});
+
+app.listen(PORT, "0.0.0.0", () => console.log(`Indo Backend listening on ${PORT}`));
