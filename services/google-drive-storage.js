@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
+const DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3";
 const OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const DEFAULT_FOLDER_NAME = "Indo Video Storage";
@@ -87,6 +88,54 @@ export async function findDriveFolderId() {
   if (!response.ok) throw new Error(data?.error?.message || "Could not access Google Drive folders.");
   if (!data?.files?.length) throw new Error(`Google Drive folder '${folderName}' was not found. Set GOOGLE_DRIVE_FOLDER_ID or create that folder in My Drive.`);
   return String(data.files[0].id);
+}
+
+export async function startResumableDriveUpload({ fileName, mimeType, folderId }) {
+  const resolvedFolderId = String(folderId || await findDriveFolderId()).trim();
+  if (!resolvedFolderId) throw new Error("Google Drive storage folder is not configured.");
+  const metadata = { name: fileName, parents: [resolvedFolderId], mimeType };
+  const token = await getAccessToken();
+  const response = await fetch(`${DRIVE_UPLOAD_API}/files?uploadType=resumable&fields=id,name,mimeType,size,webContentLink`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-Upload-Content-Type": mimeType,
+    },
+    body: JSON.stringify(metadata),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data?.error?.message || `Could not start Google Drive upload (${response.status}).`);
+  }
+  const sessionUrl = String(response.headers.get("location") || "").trim();
+  if (!sessionUrl) throw new Error("Google Drive did not return a resumable upload session.");
+  return { sessionUrl, folderId: resolvedFolderId };
+}
+
+export async function uploadDriveChunk({ sessionUrl, body, start, end, total }) {
+  const token = await getAccessToken();
+  const response = await fetch(sessionUrl, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Length": String(body.length),
+      "Content-Range": `bytes ${start}-${end}/${total}`,
+    },
+    body,
+    redirect: "follow",
+  });
+  const raw = await response.text().catch(() => "");
+  let data = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch {}
+  const range = String(response.headers.get("range") || "");
+  if (response.status === 308) {
+    return { complete: false, nextOffset: range.match(/-(\d+)$/)?.[1] ? Number(range.match(/-(\d+)$/)[1]) + 1 : end + 1 };
+  }
+  if (!response.ok || !data?.id) {
+    throw new Error(data?.error?.message || raw || `Google Drive chunk upload failed (${response.status}).`);
+  }
+  return { complete: true, file: data };
 }
 
 export async function uploadVideoToDrive({ body, fileName, mimeType }) {
