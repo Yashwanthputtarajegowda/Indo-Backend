@@ -115,12 +115,12 @@ function normalizeDriveRange(rangeHeader, total) {
   let start = match[1] ? Number(match[1]) : null;
   let end = match[2] ? Number(match[2]) : null;
   if (start === null && end !== null) {
-    const suffixLength = Math.max(0, end);
+    const suffixLength = Math.min(Math.max(0, end), RESUMABLE_CHUNK_BYTES);
     if (!suffixLength) return "";
     start = Math.max(0, total - suffixLength);
     end = total - 1;
   } else if (start !== null && end === null) {
-    end = total - 1;
+    end = Math.min(total - 1, start + RESUMABLE_CHUNK_BYTES - 1);
   }
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= total) return "";
   end = Math.min(end, total - 1);
