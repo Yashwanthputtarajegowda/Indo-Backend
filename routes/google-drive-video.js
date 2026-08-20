@@ -16,10 +16,7 @@ const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 function text(value, max = 500) { return String(value ?? "").trim().slice(0, max); }
 function safeFileName(value) { return text(value, 140).normalize("NFKD").replace(/[^A-Za-z0-9._-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "indo-video.mp4"; }
 function bool(value, fallback = true) { if (value === undefined || value === null || value === "") return fallback; return String(value).toLowerCase() !== "false"; }
-function finiteNumber(value, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
+function finiteNumber(value, fallback = 0) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : fallback; }
 function setStreamHeaders(res) { res.set({ "Cache-Control": "public, max-age=300, s-maxage=300, stale-while-revalidate=60", "Accept-Ranges": "bytes", "Content-Disposition": "inline", "X-Content-Type-Options": "nosniff" }); }
 
 export function createGoogleDriveVideoRouter({ db, requireUser }) {
@@ -81,6 +78,7 @@ export function createGoogleDriveVideoRouter({ db, requireUser }) {
       const videoRef = db.ref("videos").push();
       const videoId = String(videoRef.key);
       const baseUrl = `${req.protocol || "https"}://${req.get("host")}`;
+      const streamUrl = `${baseUrl}/api/google-drive/videos/${encodeURIComponent(videoId)}/stream`;
       const driveSize = finiteNumber(driveFile?.size, body.length);
       const video = {
         id: videoId, mediaType, mimeType, ownerUid: user.uid,
