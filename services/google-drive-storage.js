@@ -76,20 +76,21 @@ async function driveFetch(path, init = {}) {
   return fetch(`${DRIVE_API}${path}`, { ...init, headers });
 }
 
-async function findFolderId() {
+export async function findDriveFolderId() {
   const configured = env("GOOGLE_DRIVE_FOLDER_ID");
   if (configured) return configured;
   const folderName = env("GOOGLE_DRIVE_FOLDER_NAME") || DEFAULT_FOLDER_NAME;
   const query = `'root' in parents and name = '${folderName.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-  const params = new URLSearchParams({ q: query, spaces: "drive", fields: "files(id,name)", pageSize: "10" });
+  const params = new URLSearchParams({ q: query, spaces: "drive", fields: "files(id,name,mimeType)", pageSize: "10" });
   const response = await driveFetch(`/files?${params.toString()}`);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data?.files?.length) throw new Error(`Google Drive folder '${folderName}' was not found. Set GOOGLE_DRIVE_FOLDER_ID or create that folder in My Drive.`);
+  if (!response.ok) throw new Error(data?.error?.message || "Could not access Google Drive folders.");
+  if (!data?.files?.length) throw new Error(`Google Drive folder '${folderName}' was not found. Set GOOGLE_DRIVE_FOLDER_ID or create that folder in My Drive.`);
   return String(data.files[0].id);
 }
 
 export async function uploadVideoToDrive({ body, fileName, mimeType }) {
-  const folderId = await findFolderId();
+  const folderId = await findDriveFolderId();
   const metadata = { name: fileName, parents: [folderId], mimeType };
   const boundary = `indo-drive-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const prefix = Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`);
@@ -120,9 +121,9 @@ export async function getDriveStream(fileId, range = "", method = "GET") {
 }
 
 export async function driveHealth() {
-  const folderId = await findFolderId();
-  const file = await getDriveFile(folderId).catch(() => null);
-  return { ok: true, folderId, authorized: Boolean(file || folderId) };
+  const folderId = await findDriveFolderId();
+  const folder = await getDriveFile(folderId);
+  return { ok: true, folderId, authorized: true, folder };
 }
 
 export { Readable };
