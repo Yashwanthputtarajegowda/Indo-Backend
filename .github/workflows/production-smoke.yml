@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASE_URL: https://indo-backend-456919073297.asia-south1.run.app
-      EXPECTED_BACKEND_VERSION: 20260820-google-drive-v1
+      EXPECTED_BACKEND_VERSION: 20260821-google-drive-delete-v2
     steps:
       - name: Wait for deployed backend revision
         run: |
