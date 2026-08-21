@@ -1,0 +1,13 @@
+{
+  "name": "indo-firebase-functions",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^13.0.2",
+    "firebase-functions": "^6.0.1"
+  }
+}
