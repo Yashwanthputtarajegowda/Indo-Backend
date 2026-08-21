@@ -1,11 +1,11 @@
 {
   "name": "indo-backend",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --import ./open-source-video-boot.mjs server.js",
-    "start:full-security": "node --import ./telegram-only-video-policy.mjs --import ./open-source-video-boot.mjs --import ./security-bootstrap.mjs --import ./security-router-guard.mjs --import ./security-csrf.mjs --import ./security-rate-limit.mjs --import ./security-headers.mjs --import ./security-error-guard.mjs --import ./security-account-reauth.mjs --import ./security-abuse.mjs --import ./security-read-guards.mjs --import ./telegram-playback-proxy-fix.mjs --import ./telegram-boot.mjs --import ./telegram-story-boot.mjs server.js",
+    "start": "node --import ./open-source-video-boot.mjs --import ./video-delete-boot.mjs server.js",
+    "start:full-security": "node --import ./telegram-only-video-policy.mjs --import ./open-source-video-boot.mjs --import ./video-delete-boot.mjs --import ./security-bootstrap.mjs --import ./security-router-guard.mjs --import ./security-csrf.mjs --import ./security-rate-limit.mjs --import ./security-headers.mjs --import ./security-error-guard.mjs --import ./security-account-reauth.mjs --import ./security-abuse.mjs --import ./security-read-guards.mjs --import ./telegram-playback-proxy-fix.mjs --import ./telegram-boot.mjs --import ./telegram-story-boot.mjs server.js",
     "preflight:production": "node scripts/production-preflight.mjs",
     "security:smoke": "node scripts/security-smoke-test.mjs",
     "backfill:telegram-urls": "node scripts/backfill-telegram-stream-urls.mjs"
@@ -15,7 +15,7 @@
     "dotenv": "^16.4.7",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
-    "firebase-admin": "^13.0.2",
-    "helmet": "^8.1.0"
+    "helmet": "^8.1.0",
+    "firebase-admin": "^13.0.2"
   }
 }
