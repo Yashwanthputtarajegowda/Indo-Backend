@@ -169,15 +169,14 @@ app.post("/api/media/videos/:videoId/delete", async (req, res) => {
     if (!snapshot.exists()) return res.json({ ok: true, videoId, alreadyDeleted: true });
     const video = snapshot.val() || {};
     if (String(video.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own video." });
-    const googleDriveFileId = String(video.googleDrive?.fileId || video.drive?.fileId || video.storage?.fileId || video.googleDriveFileId || "").trim();
+    const googleDriveFileId = String(video.googleDrive?.fileId || "").trim();
     await deleteCanonicalVideo({ db, uid: user.uid, videoId, googleDriveFileId });
     await db.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
     await db.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
     return res.json({ ok: true, videoId, deleted: true, googleDriveFileId: Boolean(googleDriveFileId) });
   } catch (error) {
     console.error("Video delete failed:", error?.stack || error?.message || error);
-    const status = Number(error?.status) >= 400 && Number(error?.status) < 600 ? Number(error.status) : 500;
-    return res.status(status).json({ ok: false, deleted: false, error: String(error?.message || "Could not delete video.").slice(0, 500), code: String(error?.code || "VIDEO_DELETE_FAILED") });
+    return res.status(500).json({ ok: false, error: "Could not delete video." });
   }
 });
 
@@ -212,21 +211,32 @@ app.get("/api/account/me", async (req, res) => {
   if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
   try {
     const canonical = await syncCanonicalUser({ db, uid: user.uid, includeContent: true });
-    return res.json({ ok: true, profile: canonical.profile, stats: canonical.stats, settings: canonical.settings, social: canonical.social });
+    return res.json({ ok: true, profile: canonical.profile, stats: canonical.stats, settings: canonical.settings, social: canonical.social, content: canonical.content });
   } catch { return res.status(500).json({ ok: false, error: "Could not load account." }); }
 });
 
-app.use((error, _req, res, _next) => {
-  console.error("Unhandled API error:", error?.stack || error?.message || error);
-  return res.status(Number(error?.status) >= 400 && Number(error?.status) < 600 ? Number(error.status) : 500).json({ ok: false, error: String(error?.message || "Internal server error.").slice(0, 500) });
+app.get("/api/account/me/content", async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  try {
+    const canonical = await syncCanonicalUser({ db, uid: user.uid, includeContent: true });
+    return res.json({ ok: true, content: canonical.content });
+  } catch { return res.status(500).json({ ok: false, error: "Could not load account content." }); }
 });
 
-app.listen(PORT, () => console.log(`Indo-Backend listening on port ${PORT}`));
+async function runCleanup() {
+  if (!db) return;
+  try { await cleanupInactiveAccounts({ db, auth }); } catch (error) { console.error("Inactive account cleanup failed:", error?.message || error); }
+}
 
-setInterval(() => {
-  cleanupInactiveAccounts({ db }).catch((error) => console.error("Account cleanup failed:", error?.message || error));
-}, CLEANUP_INTERVAL_MS).unref();
+setInterval(runCleanup, CLEANUP_INTERVAL_MS).unref();
+runCleanup();
 
-migrateAllUsersToCanonical({ db }).catch((error) => console.error("Canonical user migration failed:", error?.message || error));
+app.use((error, _req, res, _next) => {
+  if (res.headersSent) return;
+  console.error("Unhandled backend error:", error?.stack || error?.message || error);
+  return res.status(500).json({ ok: false, error: "Internal server error." });
+});
 
-void saveCanonicalVideo;
+app.listen(PORT, "0.0.0.0", () => console.log(`Indo Backend listening on ${PORT}`));
