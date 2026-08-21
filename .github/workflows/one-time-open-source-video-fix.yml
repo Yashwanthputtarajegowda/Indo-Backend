@@ -1,10 +1,111 @@
 name: One-time open-source video fix
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  disabled:
+  hotfix:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Source resolver is now loaded by the backend startup bootstrap."
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install robust video delete route
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("server.js")
+          s = p.read_text()
+          marker = "// INDO_ROBUST_VIDEO_DELETE_V2"
+          if marker in s:
+              print("robust delete route already installed")
+              raise SystemExit(0)
+          target = 'app.post("/api/media/videos/:videoId/delete", async (req, res) => {'
+          if target not in s:
+              raise SystemExit("target delete route not found")
+          route = r'''// INDO_ROBUST_VIDEO_DELETE_V2
+app.post("/api/media/videos/:videoId/delete", async (req, res, next) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+  if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+  const videoId = String(req.params.videoId || "").trim();
+  if (!videoId) return res.status(400).json({ ok: false, error: "Video ID is required." });
+  try {
+    const uid = String(user.uid || "").trim();
+    const [videosSnapshot, canonicalVideosSnapshot, canonicalPostsSnapshot] = await Promise.all([
+      db.ref("videos").get(),
+      db.ref(`${canonicalUserRoot(uid)}/content/videos`).get(),
+      db.ref(`${canonicalUserRoot(uid)}/content/posts`).get(),
+    ]);
+    const videos = videosSnapshot.val() || {};
+    const canonicalVideos = canonicalVideosSnapshot.val() || {};
+    const canonicalPosts = canonicalPostsSnapshot.val() || {};
+    let firebaseKey = "";
+    let video = null;
+    for (const [key, item] of Object.entries(videos)) {
+      if (!item) continue;
+      if (String(key) === videoId || String(item.id || "") === videoId) {
+        firebaseKey = String(key);
+        video = item;
+        break;
+      }
+    }
+    if (!video) video = canonicalVideos[videoId] || canonicalPosts[videoId] || null;
+    if (!video) return res.status(404).json({ ok: false, error: "Video not found in Firebase." });
+    if (String(video.ownerUid || "") !== uid) return res.status(403).json({ ok: false, error: "You can delete only your own video." });
+    const googleDriveFileId = String(video.googleDrive?.fileId || video.drive?.fileId || video.storage?.fileId || video.googleDriveFileId || "").trim();
+    const provider = String(video.storage?.provider || "").trim().toLowerCase();
+    if (provider === "google-drive" && !googleDriveFileId) return res.status(409).json({ ok: false, error: "Google Drive file ID is missing for this video." });
+    if (googleDriveFileId) {
+      const { deleteDriveFile } = await import("./services/google-drive-storage.js");
+      await deleteDriveFile(googleDriveFileId);
+    }
+    const canonicalId = String(video.id || videoId).trim();
+    const updates = {
+      [`${canonicalUserRoot(uid)}/content/posts/${canonicalId}`]: null,
+      [`${canonicalUserRoot(uid)}/content/videos/${canonicalId}`]: null,
+      [`${canonicalUserRoot(uid)}/engagement/videos/${canonicalId}`]: null,
+      [`videoLikes/${canonicalId}`]: null,
+      [`videoComments/${canonicalId}`]: null,
+      [`videoSaves/${canonicalId}`]: null,
+    };
+    if (firebaseKey) updates[`videos/${firebaseKey}`] = null;
+    if (videoId !== canonicalId) updates[`videos/${videoId}`] = null;
+    await db.ref().update(updates);
+    await db.ref(`${canonicalUserRoot(uid)}/stats/postsCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
+    await db.ref(`${canonicalUserRoot(uid)}/stats/videosCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
+    return res.json({ ok: true, deleted: true, videoId: canonicalId, googleDriveFileId: Boolean(googleDriveFileId), driveDeleted: Boolean(googleDriveFileId) });
+  } catch (error) {
+    console.error("Robust video delete failed:", error?.stack || error?.message || error);
+    return res.status(Number(error?.status) || 502).json({ ok: false, error: String(error?.message || "Could not delete video.").slice(0, 500) });
+  }
+});
+'''
+          s = s.replace(target, route + target, 1)
+          p.write_text(s)
+          PY
+
+      - name: Validate JavaScript
+        run: node --check server.js
+
+      - name: Commit hotfix
+        shell: bash
+        run: |
+          if git diff --quiet -- server.js; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.js
+          git commit -m "Fix video delete lookup across Firebase schemas"
+          git push origin main
