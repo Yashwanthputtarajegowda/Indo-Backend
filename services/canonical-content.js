@@ -43,44 +43,19 @@ export async function updateCanonicalVideoViews({ db, uid, videoId, views }) {
   );
 }
 
-async function deleteDriveWithRetry(fileId) {
-  const id = String(fileId || "").trim();
-  if (!id) {
-    return { attempted: false, deleted: false, alreadyMissing: false, error: "" };
-  }
-
-  let lastError = null;
-
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      const result = await deleteDriveFile(id);
-      return {
-        attempted: true,
-        deleted: Boolean(result?.deleted),
-        alreadyMissing: Boolean(result?.alreadyMissing || result?.missing),
-        error: "",
-      };
-    } catch (error) {
-      lastError = error;
-      if (attempt < 3) {
-        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
-      }
-    }
-  }
-
-  return {
-    attempted: true,
-    deleted: false,
-    alreadyMissing: false,
-    error: String(lastError?.message || lastError || "Google Drive delete failed.").slice(0, 300),
-  };
+async function readVideoRecord(db, videoId) {
+  const snapshot = await db.ref(`videos/${videoId}`).get();
+  return snapshot.exists() ? snapshot.val() || {} : null;
 }
 
-async function readVideoDriveFileId(db, videoId) {
-  const snapshot = await db.ref(`videos/${videoId}`).get();
-  if (!snapshot.exists()) return "";
-  const video = snapshot.val() || {};
-  return String(video?.googleDrive?.fileId || "").trim();
+function driveFileIdFromVideo(video) {
+  return String(
+    video?.googleDrive?.fileId ||
+    video?.drive?.fileId ||
+    video?.storage?.fileId ||
+    video?.googleDriveFileId ||
+    "",
+  ).trim();
 }
 
 export async function deleteCanonicalVideo({ db, uid, videoId, googleDriveFileId = "" }) {
@@ -89,14 +64,17 @@ export async function deleteCanonicalVideo({ db, uid, videoId, googleDriveFileId
   const cleanVideoId = String(videoId || "").trim();
   if (!cleanVideoId) return { deleted: false, missingInput: true };
 
-  let driveFileId = String(googleDriveFileId || "").trim();
-  if (!driveFileId) driveFileId = await readVideoDriveFileId(db, cleanVideoId);
+  const sourceVideo = await readVideoRecord(db, cleanVideoId);
+  const driveFileId = String(googleDriveFileId || driveFileIdFromVideo(sourceVideo)).trim();
 
-  /*
-   * Firebase is the application's source of truth for the feed.
-   * Remove every application-side copy first. This makes deletion durable
-   * even when Google Drive is temporarily unavailable.
-   */
+  if (driveFileId) {
+    // Do not silently report success. deleteDriveFile only resolves after
+    // Google Drive confirms that the file is no longer accessible.
+    await deleteDriveFile(driveFileId);
+  }
+
+  // Firebase is the application source of truth. Remove every known copy
+  // after the Drive deletion has been confirmed.
   await db.ref().update({
     [`videos/${cleanVideoId}`]: null,
     [`${canonicalUserRoot(uid)}/content/posts/${cleanVideoId}`]: null,
@@ -107,17 +85,13 @@ export async function deleteCanonicalVideo({ db, uid, videoId, googleDriveFileId
     [`videoSaves/${cleanVideoId}`]: null,
   });
 
-  const drive = await deleteDriveWithRetry(driveFileId);
-
   return {
     deleted: true,
     videoId: cleanVideoId,
     firebaseDeleted: true,
     googleDriveFileId: Boolean(driveFileId),
-    driveDeleteAttempted: drive.attempted,
-    driveDeleted: Boolean(drive.deleted || drive.alreadyMissing),
-    driveDeletePending: Boolean(driveFileId) && !drive.deleted && !drive.alreadyMissing,
-    driveDeleteError: drive.error || "",
+    driveDeleted: Boolean(driveFileId),
+    driveDeleteVerified: Boolean(driveFileId),
   };
 }
 
