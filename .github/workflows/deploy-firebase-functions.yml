@@ -1,0 +1,36 @@
+name: Deploy Firebase Functions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "functions/**"
+      - "firebase.json"
+      - ".firebaserc"
+  workflow_dispatch:
+
+jobs:
+  deploy-functions:
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_PROJECT_ID: indo-174f0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools
+
+      - name: Install Functions dependencies
+        working-directory: functions
+        run: npm install --omit=dev
+
+      - name: Deploy Functions
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: firebase deploy --only functions --project "$FIREBASE_PROJECT_ID" --token "$FIREBASE_TOKEN" --non-interactive
