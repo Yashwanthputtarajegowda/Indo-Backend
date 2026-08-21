@@ -6,6 +6,7 @@ const OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const DEFAULT_FOLDER_NAME = "Indo Video Storage";
 const DRIVE_CHUNK_BYTES = 8 * 1024 * 1024;
+const DRIVE_DELETE_ATTEMPTS = 5;
 
 function env(name) { return String(process.env[name] || "").trim(); }
 function requireConfig() {
@@ -36,12 +37,12 @@ let cachedDriveAccessToken = "";
 let cachedDriveAccessTokenExpiresAt = 0;
 let driveTokenRefreshPromise = null;
 
-async function getAccessToken() {
+async function getAccessToken({ forceRefresh = false } = {}) {
   const now = Date.now();
-  if (cachedDriveAccessToken && now < cachedDriveAccessTokenExpiresAt - 60_000) {
+  if (!forceRefresh && cachedDriveAccessToken && now < cachedDriveAccessTokenExpiresAt - 60_000) {
     return cachedDriveAccessToken;
   }
-  if (driveTokenRefreshPromise) return driveTokenRefreshPromise;
+  if (!forceRefresh && driveTokenRefreshPromise) return driveTokenRefreshPromise;
 
   driveTokenRefreshPromise = (async () => {
     const refreshToken = env("GOOGLE_DRIVE_REFRESH_TOKEN");
@@ -64,8 +65,8 @@ async function getAccessToken() {
   }
 }
 
-async function driveFetch(path, init = {}) {
-  const token = await getAccessToken();
+async function driveFetch(path, init = {}, { forceTokenRefresh = false } = {}) {
+  const token = await getAccessToken({ forceRefresh: forceTokenRefresh });
   const headers = new Headers(init.headers || {});
   headers.set("Authorization", `Bearer ${token}`);
   return fetch(`${DRIVE_API}${path}`, { ...init, headers });
@@ -140,8 +141,8 @@ export async function uploadVideoToDrive({ body, fileName, mimeType }) {
 }
 
 export async function getDriveFile(fileId) {
-  const params = new URLSearchParams({ fields: "id,name,mimeType,size,trashed" });
-  const response = await driveFetch(`/files/${encode(fileId)}?${params.toString()}`);
+  const params = new URLSearchParams({ fields: "id,name,mimeType,size,trashed,parents,driveId" });
+  const response = await driveFetch(`/files/${encode(fileId)}?${params.toString()}&supportsAllDrives=true`);
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data?.id || data.trashed) {
     const error = new Error(data?.error?.message || "Google Drive file not found.");
@@ -152,20 +153,75 @@ export async function getDriveFile(fileId) {
   return data;
 }
 
+async function verifyDriveFileGone(fileId) {
+  try {
+    await getDriveFile(fileId);
+    return false;
+  } catch (error) {
+    if (Number(error?.status) === 404 || error?.code === "DRIVE_FILE_NOT_FOUND") return true;
+    throw error;
+  }
+}
+
 export async function deleteDriveFile(fileId) {
   const id = String(fileId || "").trim();
   if (!id) return { deleted: false, missing: true };
-  const response = await driveFetch(`/files/${encode(id)}`, { method: "DELETE" });
-  if (response.status === 204 || response.status === 200) return { deleted: true, fileId: id };
-  if (response.status === 404) return { deleted: false, alreadyMissing: true, fileId: id };
-  const data = await response.json().catch(() => ({}));
-  throw new Error(data?.error?.message || `Could not delete Google Drive file (${response.status}).`);
+
+  let lastError = null;
+  let forceRefreshUsed = false;
+
+  for (let attempt = 1; attempt <= DRIVE_DELETE_ATTEMPTS; attempt += 1) {
+    try {
+      const query = new URLSearchParams({ supportsAllDrives: "true" });
+      const response = await driveFetch(`/files/${encode(id)}?${query.toString()}`, { method: "DELETE" }, { forceTokenRefresh: forceRefreshUsed });
+
+      if (response.status === 204 || response.status === 200) {
+        for (let verifyAttempt = 1; verifyAttempt <= 4; verifyAttempt += 1) {
+          try {
+            if (await verifyDriveFileGone(id)) return { deleted: true, fileId: id, verified: true };
+          } catch (verifyError) {
+            lastError = verifyError;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250 * verifyAttempt));
+        }
+        lastError = new Error("Google Drive delete returned success, but the file is still accessible.");
+      } else if (response.status === 404) {
+        return { deleted: false, alreadyMissing: true, fileId: id };
+      } else {
+        const data = await response.json().catch(() => ({}));
+        const message = String(data?.error?.message || `Could not delete Google Drive file (${response.status}).`);
+        const error = new Error(message);
+        error.status = response.status;
+        lastError = error;
+
+        if ((response.status === 401 || response.status === 403) && !forceRefreshUsed) {
+          forceRefreshUsed = true;
+          cachedDriveAccessToken = "";
+          cachedDriveAccessTokenExpiresAt = 0;
+          continue;
+        }
+        if (response.status === 404) return { deleted: false, alreadyMissing: true, fileId: id };
+      }
+    } catch (error) {
+      lastError = error;
+      if (!forceRefreshUsed && /token|unauthori|expired|invalid credentials/i.test(String(error?.message || ""))) {
+        forceRefreshUsed = true;
+        cachedDriveAccessToken = "";
+        cachedDriveAccessTokenExpiresAt = 0;
+        continue;
+      }
+    }
+
+    if (attempt < DRIVE_DELETE_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+  }
+
+  throw new Error(String(lastError?.message || "Could not delete Google Drive file after repeated verified attempts.").slice(0, 500));
 }
 
 export async function getDriveStream(fileId, range = "", method = "GET") {
   const headers = { Accept: "video/*,*/*;q=0.8" };
   if (range) headers.Range = range;
-  return driveFetch(`/files/${encode(fileId)}?alt=media`, { method, headers, redirect: "follow" });
+  return driveFetch(`/files/${encode(fileId)}?alt=media&supportsAllDrives=true`, { method, headers, redirect: "follow" });
 }
 
 export async function driveHealth() { const folderId = await findDriveFolderId(); const folder = await getDriveFile(folderId); return { ok: true, folderId, authorized: true, folder }; }
