@@ -1,6 +1,8 @@
 import express from "express";
 import admin from "firebase-admin";
 import { getDatabaseWithUrl } from "firebase-admin/database";
+import { deleteDriveFile } from "./services/google-drive-storage.js";
+import { canonicalUserRoot } from "./services/user-canonical.js";
 
 const MAX_VIDEO_BYTES = 700 * 1024 * 1024;
 const CACHE_MS = 45_000;
@@ -158,8 +160,6 @@ express.application.get = function patchedGet(path, ...handlers) {
     const topic = String(req.query.topic || "").trim();
 
     try {
-      // Open-source videos must work even when Firebase is unavailable.
-      // Telegram/Firebase videos are only an optional first page.
       let videos = [];
       const db = getDb();
       if (db) {
@@ -199,6 +199,123 @@ express.application.get = function patchedGet(path, ...handlers) {
     } catch (error) {
       console.warn("Open-source video feed failed:", error?.message || error);
       return res.status(500).json({ ok: false, error: "Could not load videos." });
+    }
+  });
+};
+
+// Robust production delete override. The normal server route may address a video by
+// the Realtime Database key while the UI/canonical copy uses video.id. Resolve both
+// forms, recover the Drive fileId from canonical/legacy copies, delete Drive first,
+// then remove every Firebase copy only after verified Drive deletion succeeds.
+const originalPost = express.application.post;
+express.application.post = function patchedPost(path, ...handlers) {
+  if (path !== "/api/media/videos/:videoId/delete") return originalPost.call(this, path, ...handlers);
+
+  return originalPost.call(this, path, async (req, res) => {
+    const header = String(req.headers.authorization || "");
+    if (!/^Bearer\s+\S+$/i.test(header)) return res.status(401).json({ ok: false, error: "Authentication required." });
+    const auth = admin.apps.length ? admin.auth(admin.app()) : null;
+    if (!auth) return res.status(503).json({ ok: false, error: "Authentication service is unavailable." });
+    let user;
+    try {
+      user = await auth.verifyIdToken(header.replace(/^Bearer\s+/i, "").trim(), true);
+    } catch {
+      return res.status(401).json({ ok: false, error: "Invalid or expired authentication token." });
+    }
+
+    const db = getDb();
+    if (!db) return res.status(503).json({ ok: false, error: "Service unavailable." });
+    const requestedId = String(req.params.videoId || "").trim();
+    if (!requestedId) return res.status(400).json({ ok: false, error: "Video ID is missing." });
+
+    try {
+      const [allVideosSnapshot, canonicalVideoSnapshot, canonicalPostSnapshot] = await Promise.all([
+        db.ref("videos").get(),
+        db.ref(`${canonicalUserRoot(user.uid)}/content/videos/${requestedId}`).get(),
+        db.ref(`${canonicalUserRoot(user.uid)}/content/posts/${requestedId}`).get(),
+      ]);
+
+      const allVideos = allVideosSnapshot.val() || {};
+      const globalMatches = Object.entries(allVideos).filter(([key, value]) => {
+        if (!value) return false;
+        if (String(value.ownerUid || "") !== String(user.uid || "")) return false;
+        return key === requestedId || String(value.id || "") === requestedId;
+      });
+
+      const sources = [];
+      for (const [key, value] of globalMatches) sources.push({ key, video: value });
+      if (canonicalVideoSnapshot.exists()) sources.push({ key: requestedId, video: canonicalVideoSnapshot.val() || {} });
+      if (canonicalPostSnapshot.exists()) sources.push({ key: requestedId, video: canonicalPostSnapshot.val() || {} });
+
+      const unique = new Map();
+      for (const source of sources) {
+        const id = String(source.video?.id || source.key || requestedId).trim();
+        if (!unique.has(id)) unique.set(id, source);
+      }
+      const resolved = Array.from(unique.values());
+      if (!resolved.length) return res.status(404).json({ ok: false, error: "Video not found." });
+
+      const ownerMismatch = resolved.some(({ video }) => {
+        const owner = String(video?.ownerUid || "").trim();
+        return owner && owner !== String(user.uid || "");
+      });
+      if (ownerMismatch) return res.status(403).json({ ok: false, error: "You can delete only your own video." });
+
+      const driveFileIds = new Set();
+      for (const { video } of resolved) {
+        const candidates = [
+          video?.googleDrive?.fileId,
+          video?.drive?.fileId,
+          video?.storage?.fileId,
+          video?.googleDriveFileId,
+        ];
+        for (const candidate of candidates) {
+          const id = String(candidate || "").trim();
+          if (id) driveFileIds.add(id);
+        }
+      }
+
+      if (String(resolved[0]?.video?.storage?.provider || "").toLowerCase() === "google-drive" && driveFileIds.size === 0) {
+        return res.status(409).json({ ok: false, error: "Google Drive file ID is missing for this video." });
+      }
+
+      for (const fileId of driveFileIds) {
+        const result = await deleteDriveFile(fileId);
+        if (!result?.deleted && !result?.alreadyMissing) {
+          return res.status(502).json({ ok: false, error: "Google Drive file could not be deleted." });
+        }
+      }
+
+      const updates = {};
+      for (const { key, video } of globalMatches) {
+        updates[`videos/${key}`] = null;
+        const id = String(video?.id || key).trim();
+        updates[`${canonicalUserRoot(user.uid)}/content/posts/${id}`] = null;
+        updates[`${canonicalUserRoot(user.uid)}/content/videos/${id}`] = null;
+        updates[`${canonicalUserRoot(user.uid)}/engagement/videos/${id}`] = null;
+        updates[`videoLikes/${id}`] = null;
+        updates[`videoComments/${id}`] = null;
+        updates[`videoSaves/${id}`] = null;
+      }
+      if (!globalMatches.length) {
+        updates[`${canonicalUserRoot(user.uid)}/content/posts/${requestedId}`] = null;
+        updates[`${canonicalUserRoot(user.uid)}/content/videos/${requestedId}`] = null;
+        updates[`${canonicalUserRoot(user.uid)}/engagement/videos/${requestedId}`] = null;
+        updates[`videoLikes/${requestedId}`] = null;
+        updates[`videoComments/${requestedId}`] = null;
+        updates[`videoSaves/${requestedId}`] = null;
+      }
+      await db.ref().update(updates);
+
+      const previousPosts = Number((await db.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).get()).val() || 0);
+      const previousVideos = Number((await db.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).get()).val() || 0);
+      await db.ref(`${canonicalUserRoot(user.uid)}/stats/postsCount`).set(Math.max(0, previousPosts - 1));
+      await db.ref(`${canonicalUserRoot(user.uid)}/stats/videosCount`).set(Math.max(0, previousVideos - 1));
+
+      return res.json({ ok: true, videoId: requestedId, deleted: true, googleDriveDeleted: driveFileIds.size > 0, googleDriveFileCount: driveFileIds.size });
+    } catch (error) {
+      console.error("Robust video delete failed:", error?.stack || error?.message || error);
+      return res.status(Number(error?.status) || 500).json({ ok: false, error: String(error?.message || "Could not delete video.").slice(0, 300) });
     }
   });
 };
