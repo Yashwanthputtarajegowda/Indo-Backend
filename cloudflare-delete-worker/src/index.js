@@ -17,7 +17,7 @@ function decodeJwtPayload(token) {
 
 async function firebaseGet(env, path, idToken) {
   const url = new URL(`${env.FIREBASE_DATABASE_URL.replace(/\/$/, "")}/${path}.json`);
-  url.searchParams.set("access_token", idToken);
+  url.searchParams.set("auth", idToken);
   const response = await fetch(url, { headers: { accept: "application/json" } });
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new Error(data?.error || `Firebase read failed (${response.status})`);
@@ -26,7 +26,7 @@ async function firebaseGet(env, path, idToken) {
 
 async function firebasePatch(env, updates, idToken) {
   const url = new URL(`${env.FIREBASE_DATABASE_URL.replace(/\/$/, "")}/.json`);
-  url.searchParams.set("access_token", idToken);
+  url.searchParams.set("auth", idToken);
   const response = await fetch(url, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(updates) });
   const data = await response.text();
   if (!response.ok) throw new Error(data || `Firebase update failed (${response.status})`);
@@ -75,7 +75,6 @@ async function deleteDriveFile(env, fileId) {
       }
       const errorData = await delResponse.json().catch(() => ({}));
       if (delResponse.status === 401 || delResponse.status === 403) {
-        await getDriveAccessToken(env);
         globalThis.__driveToken = "";
         globalThis.__driveTokenExpiresAt = 0;
       }
@@ -107,8 +106,6 @@ export default {
     if (!videoId) return json({ ok: false, error: "Video ID is required." }, 400, cors);
 
     try {
-      // The Firebase REST request authenticates the presented Firebase ID token.
-      // We use the token only after Firebase accepts it, then compare the video owner.
       let videoKey = videoId;
       let video = await firebaseGet(env, `videos/${encodeURIComponent(videoId)}`, idToken);
 
