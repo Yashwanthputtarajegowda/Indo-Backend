@@ -1,0 +1,70 @@
+name: Deploy Indo Backend to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: true
+
+env:
+  PROJECT_ID: indo-174f0
+  REGION: asia-south1
+  SERVICE: indo-backend
+  BASE_URL: https://indo-backend-456919073297.asia-south1.run.app
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify deployment credential is configured
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GCP_SA_KEY" ]; then
+            echo "Missing GitHub Actions secret: GCP_SA_KEY"
+            echo "Add the Google Cloud service-account JSON as repository secret GCP_SA_KEY."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE }}
+          region: ${{ env.REGION }}
+          project_id: ${{ env.PROJECT_ID }}
+          source: .
+          flags: '--allow-unauthenticated'
+
+      - name: Verify live revision
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            body=$(curl --silent --show-error --max-time 15 "$BASE_URL/api/health" || true)
+            echo "$body"
+            version=$(printf '%s' "$body" | jq -r '.backendVersion // empty' 2>/dev/null || true)
+            if [ "$version" = "20260821-google-drive-delete-v2" ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Cloud Run did not expose the expected backend revision."
+          exit 1
