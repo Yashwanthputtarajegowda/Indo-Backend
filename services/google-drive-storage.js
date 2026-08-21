@@ -70,6 +70,14 @@ async function driveFetch(path, init = {}) {
   headers.set("Authorization", `Bearer ${token}`);
   return fetch(`${DRIVE_API}${path}`, { ...init, headers });
 }
+
+async function driveUploadFetch(path, init = {}) {
+  const token = await getAccessToken();
+  const headers = new Headers(init.headers || {});
+  headers.set("Authorization", `Bearer ${token}`);
+  return fetch(`${DRIVE_UPLOAD_API}${path}`, { ...init, headers });
+}
+
 export async function findDriveFolderId() {
   const configured = env("GOOGLE_DRIVE_FOLDER_ID");
   if (configured) return configured;
@@ -82,16 +90,29 @@ export async function findDriveFolderId() {
   if (!data?.files?.length) throw new Error(`Google Drive folder '${folderName}' was not found. Set GOOGLE_DRIVE_FOLDER_ID or create that folder in My Drive.`);
   return String(data.files[0].id);
 }
+
 export async function startResumableDriveUpload({ fileName, mimeType, folderId }) {
   const resolvedFolderId = String(folderId || await findDriveFolderId()).trim();
   if (!resolvedFolderId) throw new Error("Google Drive storage folder is not configured.");
   const metadata = { name: fileName, parents: [resolvedFolderId], mimeType };
-  const response = await driveFetch(`/files?uploadType=resumable&fields=id,name,mimeType,size,webContentLink`, { method: "POST", headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": mimeType }, body: JSON.stringify(metadata) });
-  if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data?.error?.message || `Could not start Google Drive upload (${response.status}).`); }
+  const response = await driveUploadFetch(`/files?uploadType=resumable&fields=id,name,mimeType,size,webContentLink`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-Upload-Content-Type": mimeType,
+    },
+    body: JSON.stringify(metadata),
+    redirect: "manual",
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data?.error?.message || `Could not start Google Drive upload (${response.status}).`);
+  }
   const sessionUrl = String(response.headers.get("location") || "").trim();
   if (!sessionUrl) throw new Error("Google Drive did not return a resumable upload session.");
   return { sessionUrl, folderId: resolvedFolderId };
 }
+
 export async function uploadDriveChunk({ sessionUrl, body, start, end, total }) {
   const token = await getAccessToken();
   const response = await fetch(sessionUrl, { method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Length": String(body.length), "Content-Range": `bytes ${start}-${end}/${total}` }, body, redirect: "follow" });
@@ -102,6 +123,7 @@ export async function uploadDriveChunk({ sessionUrl, body, start, end, total }) 
   if (!response.ok || !data?.id) throw new Error(data?.error?.message || raw || `Google Drive chunk upload failed (${response.status}).`);
   return { complete: true, file: data };
 }
+
 export async function uploadVideoToDrive({ body, fileName, mimeType }) {
   const { sessionUrl, folderId } = await startResumableDriveUpload({ fileName, mimeType });
   let offset = 0;
@@ -116,6 +138,7 @@ export async function uploadVideoToDrive({ body, fileName, mimeType }) {
   }
   throw new Error("Google Drive upload finished without a file record.");
 }
+
 export async function getDriveFile(fileId) {
   const params = new URLSearchParams({ fields: "id,name,mimeType,size,trashed" });
   const response = await driveFetch(`/files/${encode(fileId)}?${params.toString()}`);
@@ -128,6 +151,7 @@ export async function getDriveFile(fileId) {
   }
   return data;
 }
+
 export async function deleteDriveFile(fileId) {
   const id = String(fileId || "").trim();
   if (!id) return { deleted: false, missing: true };
@@ -137,10 +161,12 @@ export async function deleteDriveFile(fileId) {
   const data = await response.json().catch(() => ({}));
   throw new Error(data?.error?.message || `Could not delete Google Drive file (${response.status}).`);
 }
+
 export async function getDriveStream(fileId, range = "", method = "GET") {
   const headers = { Accept: "video/*,*/*;q=0.8" };
   if (range) headers.Range = range;
   return driveFetch(`/files/${encode(fileId)}?alt=media`, { method, headers, redirect: "follow" });
 }
+
 export async function driveHealth() { const folderId = await findDriveFolderId(); const folder = await getDriveFile(folderId); return { ok: true, folderId, authorized: true, folder }; }
 export { Readable };
