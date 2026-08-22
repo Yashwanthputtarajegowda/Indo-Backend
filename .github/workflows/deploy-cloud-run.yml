@@ -46,6 +46,7 @@ jobs:
           project_id: ${{ env.PROJECT_ID }}
 
       - name: Deploy to Cloud Run
+        timeout-minutes: 15
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.SERVICE }}
@@ -53,18 +54,27 @@ jobs:
           project_id: ${{ env.PROJECT_ID }}
           source: .
           flags: '--allow-unauthenticated'
+          wait: true
 
       - name: Verify live revision
+        timeout-minutes: 5
         run: |
           set -euo pipefail
-          for _ in $(seq 1 30); do
+          expected="20260821-google-drive-delete-v2"
+          for _ in $(seq 1 60); do
             body=$(curl --silent --show-error --max-time 15 "$BASE_URL/api/health" || true)
             echo "$body"
             version=$(printf '%s' "$body" | jq -r '.backendVersion // empty' 2>/dev/null || true)
-            if [ "$version" = "20260821-google-drive-delete-v2" ]; then
+            if [ "$version" = "$expected" ]; then
+              echo "Live backend revision verified: $version"
               exit 0
             fi
             sleep 5
           done
-          echo "Cloud Run did not expose the expected backend revision."
+          echo "Cloud Run did not expose the expected backend revision: $expected"
+          echo "Inspecting Cloud Run service state before failing..."
+          gcloud run services describe "$SERVICE" \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --format='yaml(status.latestCreatedRevisionName,status.latestReadyRevisionName,status.traffic)'
           exit 1
