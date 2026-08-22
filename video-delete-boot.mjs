@@ -12,36 +12,107 @@ function getDb() {
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
   if (!clientEmail || !privateKey) return null;
-  const app = admin.initializeApp({ credential: admin.credential.cert({ projectId, clientEmail, privateKey }), databaseURL: DATABASE_URL }, "video-delete-boot");
+  const app = admin.initializeApp({
+    credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
+    databaseURL: DATABASE_URL,
+  }, "video-delete-boot");
   return getDatabaseWithUrl(DATABASE_URL, app);
 }
 
-function driveFileIdFromVideo(video) {
-  return String(video?.googleDrive?.fileId || video?.drive?.fileId || video?.storage?.fileId || video?.googleDriveFileId || "").trim();
+function clean(value, max = 300) {
+  return String(value ?? "").trim().slice(0, max);
+}
+
+function ownerUidFromVideo(video = {}) {
+  return clean(
+    video.ownerUid ||
+    video.uid ||
+    video.userId ||
+    video.creatorUid ||
+    video.owner?.uid ||
+    video.user?.uid ||
+    "",
+    160,
+  );
+}
+
+function driveFileIdFromVideo(video = {}) {
+  return clean(
+    video?.googleDrive?.fileId ||
+    video?.drive?.fileId ||
+    video?.storage?.fileId ||
+    video?.googleDriveFileId ||
+    "",
+    300,
+  );
+}
+
+function candidateScore(video = {}, requestedId = "") {
+  const id = clean(requestedId);
+  let score = 0;
+  if (clean(video.id) === id) score += 100;
+  if (clean(video.publicId) === id) score += 90;
+  if (clean(video.videoId) === id) score += 80;
+  if (clean(video.mediaId) === id) score += 70;
+  if (clean(video.recordKey) === id) score += 60;
+  return score;
 }
 
 async function findVideo(db, uid, requestedId) {
-  const direct = await db.ref(`videos/${requestedId}`).get();
-  if (direct.exists()) return { key: requestedId, video: direct.val() || {} };
+  const id = clean(requestedId, 200);
+  if (!id) return null;
+  const owner = clean(uid, 160);
 
-  const byObjectId = await db.ref("videos").orderByChild("id").equalTo(requestedId).limitToFirst(5).get();
-  const value = byObjectId.val() || {};
-  for (const [key, video] of Object.entries(value)) {
-    if (video && String(video.ownerUid || "") === String(uid || "")) return { key, video };
+  // 1) Normal Firebase push-key lookup.
+  const direct = await db.ref(`videos/${id}`).get();
+  if (direct.exists()) {
+    const video = direct.val() || {};
+    const videoOwner = ownerUidFromVideo(video);
+    if (!videoOwner || videoOwner === owner) return { key: id, video, match: "record-key" };
   }
 
-  const [canonicalVideo, canonicalPost] = await Promise.all([
-    db.ref(`${CANONICAL_ROOT(uid)}/content/videos/${requestedId}`).get(),
-    db.ref(`${CANONICAL_ROOT(uid)}/content/posts/${requestedId}`).get(),
-  ]);
-  const candidate = canonicalVideo.exists() ? canonicalVideo.val() : canonicalPost.exists() ? canonicalPost.val() : null;
-  if (candidate) {
-    const legacyById = await db.ref("videos").orderByChild("id").equalTo(String(candidate.id || requestedId)).limitToFirst(5).get();
-    const matches = legacyById.val() || {};
-    for (const [key, video] of Object.entries(matches)) {
-      if (video && String(video.ownerUid || "") === String(uid || "")) return { key, video };
+  // 2) Exact logical id lookup. This handles older records whose Firebase
+  // push key differs from the video's own id field.
+  const allSnapshot = await db.ref("videos").get();
+  const all = allSnapshot.val() || {};
+  let best = null;
+
+  for (const [key, rawVideo] of Object.entries(all)) {
+    if (!rawVideo || typeof rawVideo !== "object") continue;
+    const videoOwner = ownerUidFromVideo(rawVideo);
+    if (videoOwner && videoOwner !== owner) continue;
+
+    const score = candidateScore(rawVideo, id);
+    const keyMatch = clean(key) === id ? 50 : 0;
+    if (score || keyMatch) {
+      const total = score + keyMatch;
+      if (!best || total > best.score) best = { key, video: rawVideo, score: total, match: "logical-id" };
     }
-    return { key: requestedId, video: candidate, canonicalOnly: true };
+  }
+  if (best) return best;
+
+  // 3) Canonical content fallback. Some migrated videos can exist only in
+  // the canonical user's content tree while the legacy /videos entry is gone.
+  const [canonicalVideo, canonicalPost] = await Promise.all([
+    db.ref(`${CANONICAL_ROOT(owner)}/content/videos/${id}`).get(),
+    db.ref(`${CANONICAL_ROOT(owner)}/content/posts/${id}`).get(),
+  ]);
+  const canonical = canonicalVideo.exists()
+    ? canonicalVideo.val()
+    : canonicalPost.exists()
+      ? canonicalPost.val()
+      : null;
+
+  if (canonical && typeof canonical === "object") {
+    const canonicalId = clean(canonical.id || canonical.publicId || canonical.videoId || id, 200);
+    for (const [key, rawVideo] of Object.entries(all)) {
+      if (!rawVideo || typeof rawVideo !== "object") continue;
+      const videoOwner = ownerUidFromVideo(rawVideo);
+      if (videoOwner && videoOwner !== owner) continue;
+      const logical = clean(rawVideo.id || rawVideo.publicId || rawVideo.videoId || "", 200);
+      if (logical && logical === canonicalId) return { key, video: rawVideo, match: "canonical-linked" };
+    }
+    return { key: canonicalId, video: { ...canonical, id: canonicalId, ownerUid: owner }, canonicalOnly: true, match: "canonical-only" };
   }
 
   return null;
@@ -68,11 +139,12 @@ express.application.post = function patchedPost(path, ...handlers) {
   return originalPost.call(this, path, async (req, res) => {
     const db = getDb();
     if (!db) return res.status(503).json({ ok: false, error: "Firebase database is unavailable." });
+
     const auth = admin.auth(admin.app());
     const user = await requireUser(req, res, auth);
     if (!user) return;
 
-    const requestedId = String(req.params.videoId || "").trim();
+    const requestedId = clean(req.params.videoId, 200);
     if (!requestedId) return res.status(400).json({ ok: false, error: "Video ID is required." });
 
     try {
@@ -80,15 +152,22 @@ express.application.post = function patchedPost(path, ...handlers) {
       if (!found) return res.status(404).json({ ok: false, error: "Video not found." });
 
       const { key: recordKey, video } = found;
-      if (String(video.ownerUid || "") !== String(user.uid || "")) return res.status(403).json({ ok: false, error: "You can delete only your own video." });
+      const ownerUid = ownerUidFromVideo(video) || String(user.uid || "");
+      if (ownerUid !== String(user.uid || "")) {
+        return res.status(403).json({ ok: false, error: "You can delete only your own video." });
+      }
 
-      const provider = String(video.storage?.provider || "").trim().toLowerCase();
+      const provider = clean(video.storage?.provider, 80).toLowerCase();
       const fileId = driveFileIdFromVideo(video);
-      if (provider === "google-drive" && !fileId) return res.status(409).json({ ok: false, error: "Google Drive file ID is missing for this video." });
+      if (provider === "google-drive" && !fileId) {
+        return res.status(409).json({ ok: false, error: "Google Drive file ID is missing for this video." });
+      }
 
+      // Delete the storage object first. Already-missing Drive files are
+      // intentionally treated as successful cleanup by deleteDriveFile().
       if (fileId) await deleteDriveFile(fileId);
 
-      const canonicalId = String(video.id || requestedId).trim();
+      const canonicalId = clean(video.id || video.publicId || video.videoId || requestedId, 200);
       const updates = {
         [`videos/${recordKey}`]: null,
         [`${CANONICAL_ROOT(user.uid)}/content/posts/${canonicalId}`]: null,
@@ -104,10 +183,21 @@ express.application.post = function patchedPost(path, ...handlers) {
       await db.ref(`${CANONICAL_ROOT(user.uid)}/stats/postsCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
       await db.ref(`${CANONICAL_ROOT(user.uid)}/stats/videosCount`).transaction((current) => Math.max(0, (Number(current) || 0) - 1));
 
-      return res.json({ ok: true, videoId: canonicalId, deleted: true, driveDeleted: Boolean(fileId), matchedRecordKey: recordKey });
+      return res.json({
+        ok: true,
+        videoId: canonicalId,
+        deleted: true,
+        alreadyDeleted: false,
+        driveDeleted: Boolean(fileId),
+        matchedRecordKey: recordKey,
+        match: found.match || "unknown",
+      });
     } catch (error) {
       console.error("Robust video delete failed:", error?.stack || error?.message || error);
-      return res.status(Number(error?.status) || 500).json({ ok: false, error: String(error?.message || "Could not delete video.").slice(0, 300) });
+      return res.status(Number(error?.status) || 500).json({
+        ok: false,
+        error: clean(error?.message || "Could not delete video.", 300),
+      });
     }
   });
 };
