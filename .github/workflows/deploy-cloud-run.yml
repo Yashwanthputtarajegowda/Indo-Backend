@@ -56,6 +56,15 @@ jobs:
           flags: '--allow-unauthenticated'
           wait: true
 
+      - name: Route 100% traffic to latest revision
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          gcloud run services update-traffic "$SERVICE" \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --to-latest
+
       - name: Verify live revision
         timeout-minutes: 5
         run: |
