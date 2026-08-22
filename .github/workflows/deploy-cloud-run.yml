@@ -13,7 +13,6 @@ env:
   PROJECT_ID: indo-174f0
   REGION: asia-south1
   SERVICE: indo-backend
-  BASE_URL: https://indo-backend-456919073297.asia-south1.run.app
 
 jobs:
   deploy:
@@ -70,8 +69,20 @@ jobs:
         run: |
           set -euo pipefail
           expected="20260821-google-drive-delete-v2"
+          live_url=$(gcloud run services describe "$SERVICE" \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --format='value(status.url)')
+
+          if [ -z "$live_url" ]; then
+            echo "Cloud Run service URL could not be determined."
+            exit 1
+          fi
+
+          echo "Checking live Cloud Run URL: $live_url"
+
           for _ in $(seq 1 60); do
-            body=$(curl --silent --show-error --max-time 15 "$BASE_URL/api/health" || true)
+            body=$(curl --silent --show-error --max-time 15 "$live_url/api/health" || true)
             echo "$body"
             version=$(printf '%s' "$body" | jq -r '.backendVersion // empty' 2>/dev/null || true)
             if [ "$version" = "$expected" ]; then
@@ -80,10 +91,12 @@ jobs:
             fi
             sleep 5
           done
+
           echo "Cloud Run did not expose the expected backend revision: $expected"
+          echo "Live URL checked: $live_url"
           echo "Inspecting Cloud Run service state before failing..."
           gcloud run services describe "$SERVICE" \
             --region "$REGION" \
             --project "$PROJECT_ID" \
-            --format='yaml(status.latestCreatedRevisionName,status.latestReadyRevisionName,status.traffic)'
+            --format='yaml(status.url,status.latestCreatedRevisionName,status.latestReadyRevisionName,status.traffic)'
           exit 1
