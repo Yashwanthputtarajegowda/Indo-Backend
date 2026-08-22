@@ -55,6 +55,34 @@ jobs:
           flags: '--allow-unauthenticated'
           wait: true
 
+      - name: Configure Firebase runtime credentials
+        timeout-minutes: 5
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          key = json.loads(os.environ["GCP_SA_KEY"])
+          project_id = str(key.get("project_id") or "indo-174f0")
+          client_email = str(key.get("client_email") or "")
+          private_key = str(key.get("private_key") or "")
+          if not client_email or not private_key:
+              raise SystemExit("GCP_SA_KEY is missing client_email or private_key")
+          escaped_key = private_key.replace("\n", "\\n")
+          for value in (client_email, private_key, escaped_key):
+              print(f"::add-mask::{value}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"FIREBASE_PROJECT_ID={project_id}\n")
+              env_file.write(f"FIREBASE_CLIENT_EMAIL={client_email}\n")
+              env_file.write(f"FIREBASE_PRIVATE_KEY={escaped_key}\n")
+          PY
+
+          gcloud run services update "$SERVICE" \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --update-env-vars "FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID,FIREBASE_CLIENT_EMAIL=$FIREBASE_CLIENT_EMAIL,FIREBASE_PRIVATE_KEY=$FIREBASE_PRIVATE_KEY"
+
       - name: Route 100% traffic to latest revision
         timeout-minutes: 5
         run: |
@@ -85,14 +113,16 @@ jobs:
             body=$(curl --silent --show-error --max-time 15 "$live_url/api/health" || true)
             echo "$body"
             version=$(printf '%s' "$body" | jq -r '.backendVersion // empty' 2>/dev/null || true)
-            if [ "$version" = "$expected" ]; then
-              echo "Live backend revision verified: $version"
+            firebase_admin=$(printf '%s' "$body" | jq -r '.firebaseAdmin // false' 2>/dev/null || true)
+            database_configured=$(printf '%s' "$body" | jq -r '.databaseConfigured // false' 2>/dev/null || true)
+            if [ "$version" = "$expected" ] && [ "$firebase_admin" = "true" ] && [ "$database_configured" = "true" ]; then
+              echo "Live backend revision and Firebase runtime verified: $version"
               exit 0
             fi
             sleep 5
           done
 
-          echo "Cloud Run did not expose the expected backend revision: $expected"
+          echo "Cloud Run did not expose the expected healthy backend revision: $expected"
           echo "Live URL checked: $live_url"
           echo "Inspecting Cloud Run service state before failing..."
           gcloud run services describe "$SERVICE" \
