@@ -62,26 +62,32 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os
+          import json
+          import os
+          import subprocess
+
           key = json.loads(os.environ["GCP_SA_KEY"])
           project_id = str(key.get("project_id") or "indo-174f0")
           client_email = str(key.get("client_email") or "")
           private_key = str(key.get("private_key") or "")
+
           if not client_email or not private_key:
               raise SystemExit("GCP_SA_KEY is missing client_email or private_key")
-          escaped_key = private_key.replace("\n", "\\n")
-          for value in (client_email, private_key, escaped_key):
-              print(f"::add-mask::{value}")
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              env_file.write(f"FIREBASE_PROJECT_ID={project_id}\n")
-              env_file.write(f"FIREBASE_CLIENT_EMAIL={client_email}\n")
-              env_file.write(f"FIREBASE_PRIVATE_KEY={escaped_key}\n")
-          PY
 
-          gcloud run services update "$SERVICE" \
-            --region "$REGION" \
-            --project "$PROJECT_ID" \
-            --update-env-vars "FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID,FIREBASE_CLIENT_EMAIL=$FIREBASE_CLIENT_EMAIL,FIREBASE_PRIVATE_KEY=$FIREBASE_PRIVATE_KEY"
+          for value in (client_email, private_key):
+              print(f"::add-mask::{value}")
+
+          subprocess.run(
+              [
+                  "gcloud", "run", "services", "update", os.environ["SERVICE"],
+                  "--region", os.environ["REGION"],
+                  "--project", os.environ["PROJECT_ID"],
+                  "--update-env-vars",
+                  f"FIREBASE_PROJECT_ID={project_id},FIREBASE_CLIENT_EMAIL={client_email},FIREBASE_PRIVATE_KEY={private_key}",
+              ],
+              check=True,
+          )
+          PY
 
       - name: Route 100% traffic to latest revision
         timeout-minutes: 5
